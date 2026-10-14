@@ -1,9 +1,11 @@
-# The app and its PostgreSQL, run as in production. compose.override.yaml,
-# which `docker compose up` also reads, adds what development needs.
-# POSTGRES_PASSWORD comes from the environment or from .env.
+# The app and its PostgreSQL, run as in production, after Docker's "Use
+# Compose in production": the code stays in the image, only the app's port
+# reaches the host, and the services restart on their own.
+# POSTGRES_PASSWORD comes from the environment or from .env (see .env.example).
 services:
   db:
     image: postgres:18
+    restart: always
     environment:
       POSTGRES_USER: corvo
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Variable not set}
@@ -17,17 +19,28 @@ services:
       start_period: 30s
       timeout: 10s
 
-  app:
+  # The migrations run once, before the app starts, so a restart of the app
+  # does not run them again.
+  migrate:
     build: .
     depends_on:
       db:
         condition: service_healthy
-        restart: true
     environment:
       CORVO_DATABASE_URL: postgresql+asyncpg://corvo:${POSTGRES_PASSWORD:?Variable not set}@db:5432/corvo
-    # The migrations run before the server starts, as Polar's development
-    # setup does.
-    command: ["sh", "-c", "alembic -c src/corvo/server/database/alembic.ini upgrade head && exec uvicorn corvo.server.api.server:app --host 0.0.0.0 --port 8000"]
+    command: ["alembic", "-c", "src/corvo/server/database/alembic.ini", "upgrade", "head"]
+
+  app:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      CORVO_DATABASE_URL: postgresql+asyncpg://corvo:${POSTGRES_PASSWORD:?Variable not set}@db:5432/corvo
     ports:
       - "8000:8000"
     healthcheck:
