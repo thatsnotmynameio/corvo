@@ -1,0 +1,11 @@
+# Laid over compose.yaml by the integration tests: the engine's gRPC and the
+# API reach the host, on the free ports the tests pick, so a worker and a
+# client outside compose reach them at the addresses the token holds.
+services:
+  hatchet-engine:
+    ports:
+      - "127.0.0.1:${HATCHET_TEST_GRPC_PORT:?Variable not set}:7070"
+
+  hatchet-dashboard:
+    ports: !override
+      - "127.0.0.1:${HATCHET_TEST_API_PORT:?Variable not set}:80"

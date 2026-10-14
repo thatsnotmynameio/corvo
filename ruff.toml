@@ -11,7 +11,13 @@ select = ["E", "W", "F", "I", "UP", "B", "TID251"]
 [lint.flake8-tidy-imports.banned-api]
 "fastapi".msg = "Only corvo.server.api imports FastAPI."
 "starlette".msg = "Only corvo.server.api imports Starlette."
+# Hatchet is the worker's alone, and an interface never imports another.
+"hatchet_sdk".msg = "Only corvo.worker imports Hatchet."
+"corvo.worker".msg = "Only corvo.worker imports the worker."
 
 [lint.per-file-ignores]
 "src/corvo/server/api/**" = ["TID251"]
 "tests/server/api/**" = ["TID251"]
+"src/corvo/worker/**" = ["TID251"]
+"tests/worker/**" = ["TID251"]
+"tests/integration/worker/**" = ["TID251"]
