@@ -15,6 +15,7 @@ from corvo.worker.defaults import RETRIES
 from corvo.worker.tasks.hello import HelloInput, HelloOutput, hello
 from corvo.worker.workflows.greeting import GreetingInput, greeting
 from corvo.worker.workflows.greeting_rounds import (
+    APPROVAL_EVENT,
     GreetingRoundsInput,
     GreetingRoundsOutput,
     greeting_rounds,
@@ -34,8 +35,8 @@ class HelloReplacement:
 
 
 class GreetingReplacement:
-    """Stands in for greeting.aio_run, returning the result shape the
-    greeting-rounds integration test observes."""
+    """Stands in for greeting.aio_run, returning the DAG's result keyed by
+    step name, as the greeting-rounds integration test finds it."""
 
     def __init__(self) -> None:
         self.received: list[GreetingInput] = []
@@ -127,7 +128,8 @@ async def test_a_timeout_takes_the_timed_out_path(
 @pytest.mark.parametrize(
     ("target_length", "max_rounds", "names"),
     [
-        # Three rounds reach 20 characters, so max_rounds stops the loop.
+        # The message never reaches 200 characters, so max_rounds stops the
+        # loop.
         (200, 3, ["corvo", "Hi, corvo.", "Hi, Hi, corvo.."]),
         # The second reply has 15 characters.
         (15, 5, ["corvo", "Hi, corvo."]),
@@ -166,7 +168,7 @@ async def test_the_wait_matches_the_runs_approval_key_or_sleeps(
     assert isinstance(group, OrGroup)
     [event, sleep] = group.conditions
     assert isinstance(event, UserEventCondition)
-    assert event.event_key == "greeting:approved"
+    assert event.event_key == APPROVAL_EVENT
     assert event.expression == "input.approval_key == 'run-7'"
     assert event.scope == "approval_key:run-7"
     assert event.consider_events_since is not None
