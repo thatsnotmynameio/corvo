@@ -17,7 +17,7 @@ execution: code
 - **Product authority:** the repository owner, who settled every decision recorded under Key Decisions and Key Technical Decisions. The Product Contract wins on behavior; a KTD wins on mechanism within its cited requirements.
 - **Execution profile:** five units in dependency order, each landing as one commit. Unit and integration tests land with the unit they prove.
 - **Stop conditions:** stop and ask when an SDK behavior the plan relies on (child spawning from a DAG step or failure handler, or-group event waits with scope and lookback, mock runs with patched children) does not work on hatchet-sdk 1.42.1 against engine v0.110.5, or when CI's 90% coverage floor cannot be held without excluding code.
-- **Finishes and ships:** crew's development stage under `.crew/config.yaml`, not a hand-made commit or pull request.
+- **Finishes and ships:** a `gh stack` stack, one layer per unit, each built from its part plan (Split into parts, below).
 - **Open blockers:** none.
 
 ---
@@ -445,3 +445,17 @@ For a failing or stuck run, the Hatchet CLI is installed: `skills/hatchet-cli/re
 - Outside `defaults.py`, the only literal retries or timeout values under `src/corvo/worker` are the `retries=0` overrides of KTD2 and the durable example's documented 30-minute timeout (KTD7).
 - No abandoned attempt remains in the diff: no unused helpers, commented-out code or leftover test files from approaches that did not pan out.
 - Per unit: U1 when nothing imports the old path; U2 when `hello` reads its values from `defaults.py`; U3 when removing a line from `WORKFLOWS` fails the suite by name; U4 and U5 when their integration tests pass on compose.
+
+---
+
+## Split into parts
+
+Each unit has its own plan, built to be enough on its own to deliver that unit; this file stays the whole picture. The parts ship as one `gh stack` stack, bottom to top: `docs/worker-tasks-workflows-plan` (the plans), then one branch per part.
+
+| Part | Plan | Branch | Depends on |
+|---|---|---|---|
+| U1 | `docs/plans/2026-10-14-1724-feat-worker-tasks-workflows-skeleton-u1-hello-core-plan.md` | `feat/worker-u1-hello-core` | none |
+| U2 | `docs/plans/2026-10-14-1724-feat-worker-tasks-workflows-skeleton-u2-defaults-plan.md` | `feat/worker-u2-defaults` | U1 |
+| U3 | `docs/plans/2026-10-14-1724-feat-worker-tasks-workflows-skeleton-u3-registration-plan.md` | `feat/worker-u3-registration` | U1 |
+| U4 | `docs/plans/2026-10-14-1724-feat-worker-tasks-workflows-skeleton-u4-greeting-dag-plan.md` | `feat/worker-u4-greeting-dag` | U2, U3 |
+| U5 | `docs/plans/2026-10-14-1724-feat-worker-tasks-workflows-skeleton-u5-greeting-rounds-plan.md` | `feat/worker-u5-greeting-rounds` | U4 |
