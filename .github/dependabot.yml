@@ -1,6 +1,7 @@
-# Weekly pull requests for new versions of the actions, pinned by SHA, and of
-# the Python dependencies in uv.lock. A version is proposed only once it is 7
-# days old, so a compromised release has time to be pulled.
+# Weekly pull requests for new versions of the actions, pinned by SHA, of the
+# Python dependencies in uv.lock, and of the images of the Dockerfile and the
+# compose files. A version is proposed only once it is 7 days old, so a
+# compromised release has time to be pulled.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -25,4 +26,30 @@ updates:
       prefix: "deps"
     groups:
       python:
+        patterns: ["*"]
+
+  # The Dockerfile's python and uv images.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps"
+    groups:
+      docker:
+        patterns: ["*"]
+
+  # compose.yaml's postgres image.
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "deps"
+    groups:
+      docker-compose:
         patterns: ["*"]
