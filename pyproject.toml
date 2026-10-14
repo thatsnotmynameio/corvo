@@ -10,9 +10,10 @@ requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
     "asyncpg>=0.32.0",
-    "fastapi[standard]>=0.143.0",
+    "fastapi>=0.143.0",
     "pydantic-settings>=2.15.0",
     "sqlalchemy[asyncio]>=2.1.4",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [build-system]
@@ -25,9 +26,6 @@ dev = [
     "import-linter>=2.15",
     "pytest>=9.1.1",
 ]
-
-[tool.fastapi]
-entrypoint = "corvo.main:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

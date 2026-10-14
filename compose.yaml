@@ -27,7 +27,7 @@ services:
       CORVO_DATABASE_URL: postgresql+asyncpg://corvo:${POSTGRES_PASSWORD:?Variable not set}@db:5432/corvo
     # The migrations run before the server starts, as Polar's development
     # setup does.
-    command: ["sh", "-c", "alembic upgrade head && exec fastapi run"]
+    command: ["sh", "-c", "alembic upgrade head && exec uvicorn corvo.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     healthcheck:
