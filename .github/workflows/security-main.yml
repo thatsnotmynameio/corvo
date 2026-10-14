@@ -1,0 +1,49 @@
+# Grype's and zizmor's analyses of main, published to GitHub code scanning:
+# code scanning compares each pull request's alerts with them. Only on a push
+# to main and daily: on a pull request the organization's rulesets run the
+# same workflows, as the checks "tnmn.io: grype" and "tnmn.io: zizmor". A
+# push or a schedule only starts this repository's own workflows, so the
+# analyses of main run here.
+# Code scanning tells analyses apart by workflow file, job and category: a
+# renamed file, job or category leaves its old alerts open on main.
+name: Security (main)
+
+on:
+  push:
+    branches: [main]
+  # Daily as well: grype's analysis of main then shows an advisory published
+  # since the last push within a day, and a pull request stops seeing it as
+  # one it adds.
+  schedule:
+    - cron: "13 6 * * *"
+
+permissions: {}
+
+jobs:
+  # Grype's analysis, through the organization's workflow
+  # (thatsnotmynameio/github-actions' grype.yml) under the category "grype":
+  # vulnerable dependencies and malicious packages in every manifest. It never
+  # fails on a finding.
+  grype:
+    name: grype
+    permissions:
+      contents: read
+      security-events: write # uploads the results to code scanning
+    concurrency:
+      group: ${{ github.workflow }}-grype-${{ github.sha }}
+      cancel-in-progress: false
+    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main
+
+  # zizmor's audit of the workflows, through the organization's workflow
+  # (thatsnotmynameio/github-actions' zizmor.yml) under the category "zizmor".
+  # On a pull request the ruleset's run reads .github/zizmor.yml from the base
+  # commit. It never fails on a finding.
+  zizmor:
+    name: zizmor
+    permissions:
+      contents: read
+      security-events: write # uploads the results to code scanning
+    concurrency:
+      group: ${{ github.workflow }}-zizmor-${{ github.sha }}
+      cancel-in-progress: false
+    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main

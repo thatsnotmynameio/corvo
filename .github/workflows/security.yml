@@ -1,14 +1,13 @@
-# Every pull request and each push to main: the security analyses, published
-# to GitHub code scanning. The push gives code scanning the analysis of main
-# that a pull request's alerts are compared against. CodeQL analyses Python
-# (once the repository has pyproject.toml) and GitHub Actions, through the
+# Every pull request and each push to main: CodeQL's analysis, published to
+# GitHub code scanning. The push gives code scanning the analysis of main that
+# a pull request's alerts are compared against. CodeQL analyses Python (once
+# the repository has pyproject.toml) and GitHub Actions, through the
 # organization's workflow (thatsnotmynameio/github-actions' codeql.yml), here
 # on every run: GitHub does not allow CodeQL in a workflow a ruleset requires.
-# Grype, which scans the repository's dependencies, and zizmor, which audits
-# the workflows' security, run here only on a push to main and daily, through
-# the organization's workflows: on a pull request the organization's rulesets
-# run them, as the checks "tnmn.io: grype" and "tnmn.io: zizmor", and
-# "tnmn.io: dependency-review" checks the dependencies a pull request adds.
+# Grype and zizmor analyse main in security-main.yml; on a pull request the
+# organization's rulesets run them, as the checks "tnmn.io: grype" and
+# "tnmn.io: zizmor", and "tnmn.io: dependency-review" checks the dependencies
+# a pull request adds.
 # No job holds a secret: code scanning accepts an upload from any run that
 # the pull_request event started, a fork's included, with the read-only token.
 # No paths filter: these checks are required, and a required check that a
@@ -22,11 +21,10 @@ on:
   pull_request:
   push:
     branches: [main]
-  # Daily as well: grype's analysis of main then shows an advisory published
-  # since the last push within a day, and a pull request stops seeing it as
-  # one it adds.
+  # Weekly as well: CodeQL's analysis of main then picks up the queries
+  # released since the last push.
   schedule:
-    - cron: "17 5 * * *"
+    - cron: "13 6 * * 1"
 
 permissions: {}
 
@@ -44,39 +42,3 @@ jobs:
       contents: read
       security-events: write # uploads the results to code scanning
     uses: thatsnotmynameio/github-actions/.github/workflows/codeql.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main
-
-  # Grype's analysis of main, on each push and daily, through the
-  # organization's workflow (thatsnotmynameio/github-actions' grype.yml) under
-  # the category "grype": vulnerable dependencies and malicious packages in
-  # every manifest. On a pull request the organization's ruleset runs the same
-  # workflow, as the check "tnmn.io: grype". It never fails on a finding.
-  # The category "grype" is a contract: a renamed category leaves its old
-  # alerts open on main.
-  grype:
-    name: grype
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-      security-events: write # uploads the results to code scanning
-    concurrency:
-      group: ${{ github.workflow }}-grype-${{ github.sha }}
-      cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main
-
-  # zizmor's analysis of main, through the organization's workflow
-  # (thatsnotmynameio/github-actions' zizmor.yml) under the category "zizmor":
-  # code scanning compares each pull request's zizmor alerts with it. On a pull
-  # request the organization's ruleset runs the same workflow, as the check
-  # "tnmn.io: zizmor", with .github/zizmor.yml from the base commit. It never
-  # fails on a finding.
-  # The category "zizmor" is a contract, as for grype above.
-  zizmor:
-    name: zizmor
-    if: github.event_name != 'pull_request'
-    permissions:
-      contents: read
-      security-events: write # uploads the results to code scanning
-    concurrency:
-      group: ${{ github.workflow }}-zizmor-${{ github.sha }}
-      cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main
