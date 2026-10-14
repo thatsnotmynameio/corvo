@@ -8,15 +8,12 @@ services:
       - "5432:5432"
 
   app:
-    command: ["sh", "-c", "alembic upgrade head && exec uvicorn corvo.main:app --host 0.0.0.0 --port 8000 --reload"]
+    command: ["sh", "-c", "alembic -c src/corvo/server/database/alembic.ini upgrade head && exec uvicorn corvo.server.api.server:app --host 0.0.0.0 --port 8000 --reload"]
     develop:
       watch:
         - path: ./src
           action: sync
           target: /app/src
-        - path: ./migrations
-          action: sync
-          target: /app/migrations
         - path: ./pyproject.toml
           action: rebuild
         - path: ./uv.lock

@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from corvo.exceptions import ConflictError, CorvoError, NotFoundError
-from corvo.main import create_app
+from corvo.server.api.server import create_app
 
 
 def test_health() -> None:

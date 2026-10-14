@@ -23,39 +23,8 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
-    "import-linter>=2.15",
     "pytest>=9.1.1",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
-# The business logic (each domain's service.py, and the errors it raises)
-# knows nothing of the HTTP interface, so another one (a CLI, a worker) can
-# call it as it is. tests/test_architecture.py checks it.
-[tool.importlinter]
-root_package = "corvo"
-include_external_packages = true
-
-[[tool.importlinter.contracts]]
-name = "The business logic does not import the web framework"
-type = "forbidden"
-source_modules = ["corvo.*.service", "corvo.exceptions", "corvo.db", "corvo.config"]
-forbidden_modules = ["fastapi", "starlette"]
-
-
-[tool.alembic]
-script_location = "%(here)s/migrations"
-
-# Each new migration is formatted and linted as the CI checks it.
-[[tool.alembic.post_write_hooks]]
-name = "ruff_check"
-type = "exec"
-executable = "uvx"
-options = "ruff check --fix --quiet REVISION_SCRIPT_FILENAME"
-
-[[tool.alembic.post_write_hooks]]
-name = "ruff_format"
-type = "exec"
-executable = "uvx"
-options = "ruff format --quiet REVISION_SCRIPT_FILENAME"

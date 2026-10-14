@@ -6,11 +6,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from corvo.config import get_settings
-from corvo.db import Base
-
-# Each domain's models.py is imported here, so autogenerate sees its tables:
-# import corvo.<domain>.models
+from corvo.server.database.orm_models import Base
+from corvo.settings import get_settings
 
 config = context.config
 if config.config_file_name is not None:

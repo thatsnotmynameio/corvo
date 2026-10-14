@@ -1,5 +1,5 @@
 class CorvoError(Exception):
-    """A business error. The services raise it, knowing nothing of HTTP."""
+    """A business error. The business logic raises it, knowing nothing of HTTP."""
 
 
 class NotFoundError(CorvoError):

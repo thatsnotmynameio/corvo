@@ -6,9 +6,9 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, SessionTransaction
 
-from corvo.dependencies import SessionDep
 from corvo.exceptions import ConflictError
-from corvo.main import create_app
+from corvo.server.api.dependencies import SessionDep
+from corvo.server.api.server import create_app
 
 
 @pytest.fixture

@@ -9,8 +9,8 @@ async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
     """The request's database session, in one transaction.
 
     The transaction commits when the route returns and rolls back when it
-    raises, as Polar's TransactionalMiddleware does. The services only flush:
-    one that calls another stays in the same transaction.
+    raises, as Polar's TransactionalMiddleware does. The code below the routes
+    only flushes, so whatever a request calls stays in one transaction.
     """
     async with request.app.state.sessionmaker() as session, session.begin():
         yield session
