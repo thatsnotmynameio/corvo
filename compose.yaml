@@ -80,6 +80,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # The Hatchet worker, from the app's image. It reaches the engine at the
+  # address in its token, HATCHET_GRPC_BROADCAST_ADDRESS, and depends on the
+  # engine as Hatchet's Docker Compose guide says. Without TLS on the engine's
+  # gRPC, its own TLS is off too.
+  worker:
+    build: .
+    restart: always
+    command: ["corvo-worker"]
+    environment:
+      CORVO_HATCHET_TOKEN: ${HATCHET_CLIENT_TOKEN?Variable not set}
+      CORVO_HATCHET_TLS_STRATEGY: ${HATCHET_CLIENT_TLS_STRATEGY:?Variable not set}
+    depends_on:
+      hatchet-engine:
+        condition: service_started
+
   # Hatchet, after its Docker Compose guide
   # (https://docs.hatchet.run/self-hosting/docker-compose), with PostgreSQL as
   # its message queue in place of RabbitMQ. Its images are pinned to the

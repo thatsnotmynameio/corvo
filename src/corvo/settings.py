@@ -1,4 +1,5 @@
 from functools import cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
@@ -18,6 +19,10 @@ class Settings(BaseSettings):
     postgres_host: str = "localhost"
     postgres_port: int = 5432
     postgres_database: str = "corvo"
+    # The worker's Hatchet API token, which also holds the engine's address.
+    hatchet_token: str = ""
+    # none: the engine's gRPC has no TLS, as compose runs it.
+    hatchet_tls_strategy: Literal["tls", "mtls", "none"] = "none"
 
     def get_postgres_dsn(self) -> str:
         # Built as Polar builds it: URL.create escapes the password.
