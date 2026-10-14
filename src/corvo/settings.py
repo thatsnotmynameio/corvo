@@ -1,7 +1,7 @@
 from functools import cache
 
-from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import URL
 
 
 class Settings(BaseSettings):
@@ -13,9 +13,22 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CORVO_")
 
     debug: bool = False
-    database_url: PostgresDsn = PostgresDsn(
-        "postgresql+asyncpg://corvo:corvo@localhost:5432/corvo"
-    )
+    postgres_user: str = "corvo"
+    postgres_password: str = "corvo"
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_database: str = "corvo"
+
+    def get_postgres_dsn(self) -> str:
+        # Built as Polar builds it: URL.create escapes the password.
+        return URL.create(
+            "postgresql+asyncpg",
+            username=self.postgres_user,
+            password=self.postgres_password,
+            host=self.postgres_host,
+            port=self.postgres_port,
+            database=self.postgres_database,
+        ).render_as_string(hide_password=False)
 
 
 @cache

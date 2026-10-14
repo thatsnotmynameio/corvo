@@ -1,19 +1,30 @@
 # The app and its PostgreSQL, run as in production, after Docker's "Use
 # Compose in production": the code stays in the image, only the app's port
 # reaches the host, and the services restart on their own.
-# POSTGRES_PASSWORD comes from the environment or from .env (see .env.example).
+# The database's user, password and name come from the environment or from
+# .env (see .env.example).
+
+# The image and the database settings migrate and app share.
+x-corvo: &corvo
+  build: .
+  environment:
+    CORVO_POSTGRES_HOST: db
+    CORVO_POSTGRES_USER: ${POSTGRES_USER:?Variable not set}
+    CORVO_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Variable not set}
+    CORVO_POSTGRES_DATABASE: ${POSTGRES_DB:?Variable not set}
+
 services:
   db:
     image: postgres:18
     restart: always
     environment:
-      POSTGRES_USER: corvo
+      POSTGRES_USER: ${POSTGRES_USER:?Variable not set}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Variable not set}
-      POSTGRES_DB: corvo
+      POSTGRES_DB: ${POSTGRES_DB:?Variable not set}
     volumes:
       - db-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U corvo -d corvo"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       retries: 5
       start_period: 30s
@@ -22,16 +33,14 @@ services:
   # The migrations run once, before the app starts, so a restart of the app
   # does not run them again.
   migrate:
-    build: .
+    <<: *corvo
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      CORVO_DATABASE_URL: postgresql+asyncpg://corvo:${POSTGRES_PASSWORD:?Variable not set}@db:5432/corvo
     command: ["alembic", "-c", "src/corvo/server/database/alembic.ini", "upgrade", "head"]
 
   app:
-    build: .
+    <<: *corvo
     restart: always
     depends_on:
       db:
@@ -39,8 +48,6 @@ services:
         restart: true
       migrate:
         condition: service_completed_successfully
-    environment:
-      CORVO_DATABASE_URL: postgresql+asyncpg://corvo:${POSTGRES_PASSWORD:?Variable not set}@db:5432/corvo
     ports:
       - "8000:8000"
     healthcheck:
