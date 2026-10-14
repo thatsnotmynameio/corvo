@@ -1,6 +1,8 @@
 # The organization's Python checks (thatsnotmynameio/github-actions'
 # python.yml) read this file from a pull request's base commit: a change here
 # applies once it merges.
+# The systems the tests run on.
+systems: [linux]
 # The least total coverage, in percent, of the statements and branches the
 # tests cover on Linux.
 coverage: 90

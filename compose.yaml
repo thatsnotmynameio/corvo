@@ -1,0 +1,44 @@
+# The app and its PostgreSQL, run as in production. compose.override.yaml,
+# which `docker compose up` also reads, adds what development needs.
+# POSTGRES_PASSWORD comes from the environment or from .env.
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: corvo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Variable not set}
+      POSTGRES_DB: corvo
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corvo -d corvo"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    environment:
+      CORVO_DATABASE_URL: postgresql+asyncpg://corvo:${POSTGRES_PASSWORD:?Variable not set}@db:5432/corvo
+    # The migrations run before the server starts, as Polar's development
+    # setup does.
+    command: ["sh", "-c", "alembic upgrade head && exec fastapi run"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  db-data:
