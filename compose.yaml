@@ -1,8 +1,8 @@
-# The app and its PostgreSQL, run as in production, after Docker's "Use
-# Compose in production": the code stays in the image, only the app's port
-# reaches the host, and the services restart on their own.
-# The database's user, password and name come from the environment or from
-# .env (see .env.example).
+# The app and its PostgreSQL, and Hatchet and its own, run as in production,
+# after Docker's "Use Compose in production": the code stays in the image,
+# only the app's and Hatchet's dashboard's ports reach the host, and the
+# services restart on their own.
+# Their settings come from the environment or from .env (see .env.example).
 
 # The image and the database settings migrate and app share.
 x-corvo: &corvo
@@ -12,6 +12,26 @@ x-corvo: &corvo
     CORVO_POSTGRES_USER: ${POSTGRES_USER:?Variable not set}
     CORVO_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Variable not set}
     CORVO_POSTGRES_DATABASE: ${POSTGRES_DB:?Variable not set}
+
+# Hatchet's DATABASE_URL. hatchet-migrate reads no other setting, so the user
+# and the password go in the URL and must not need escaping (see
+# .env.example).
+x-hatchet-database-url: &hatchet-database-url "postgres://${HATCHET_POSTGRES_USER:?Variable not set}:${HATCHET_POSTGRES_PASSWORD:?Variable not set}@hatchet-db:5432/${HATCHET_POSTGRES_DB:?Variable not set}?sslmode=disable"
+
+# The settings hatchet-setup writes to the config, given to the engine and the
+# dashboard too: the config leaves out a setting whose value is false, such as
+# SERVER_ALLOW_SIGNUP, which then falls back to its default, true.
+x-hatchet-environment: &hatchet-environment
+  DATABASE_URL: *hatchet-database-url
+  SERVER_MSGQUEUE_KIND: ${HATCHET_MSGQUEUE_KIND:?Variable not set}
+  SERVER_URL: ${HATCHET_SERVER_URL:?Variable not set}
+  SERVER_AUTH_COOKIE_DOMAIN: ${HATCHET_AUTH_COOKIE_DOMAIN:?Variable not set}
+  SERVER_AUTH_COOKIE_INSECURE: ${HATCHET_AUTH_COOKIE_INSECURE:?Variable not set}
+  SERVER_ALLOW_SIGNUP: ${HATCHET_ALLOW_SIGNUP:?Variable not set}
+  SERVER_GRPC_BIND_ADDRESS: ${HATCHET_GRPC_BIND_ADDRESS:?Variable not set}
+  SERVER_GRPC_INSECURE: ${HATCHET_GRPC_INSECURE:?Variable not set}
+  SERVER_GRPC_BROADCAST_ADDRESS: ${HATCHET_GRPC_BROADCAST_ADDRESS:?Variable not set}
+  SERVER_INTERNAL_CLIENT_INTERNAL_GRPC_BROADCAST_ADDRESS: ${HATCHET_INTERNAL_GRPC_BROADCAST_ADDRESS:?Variable not set}
 
 services:
   db:
@@ -60,5 +80,103 @@ services:
       timeout: 5s
       retries: 5
 
+  # Hatchet, after its Docker Compose guide
+  # (https://docs.hatchet.run/self-hosting/docker-compose), with PostgreSQL as
+  # its message queue in place of RabbitMQ. Its images are pinned to the
+  # release GitHub marks as latest, the one Hatchet's docs point to.
+
+  # Hatchet's own PostgreSQL. A crash Hatchet's queries set off restarts the
+  # whole cluster (hatchet-dev/hatchet#5101), and Hatchet's CI runs on
+  # PostgreSQL 17, so it does not share corvo's db. max_connections and
+  # shm_size follow Hatchet's guide: its engine and API each pool up to 50
+  # connections, and the default 64 MB of /dev/shm slows its queries down.
+  hatchet-db:
+    image: postgres:17
+    restart: always
+    command: ["postgres", "-c", "max_connections=500"]
+    shm_size: 1g
+    environment:
+      POSTGRES_USER: ${HATCHET_POSTGRES_USER:?Variable not set}
+      POSTGRES_PASSWORD: ${HATCHET_POSTGRES_PASSWORD:?Variable not set}
+      POSTGRES_DB: ${HATCHET_POSTGRES_DB:?Variable not set}
+    volumes:
+      - hatchet-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+
+  hatchet-migrate:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-migrate:v0.110.5
+    command: ["/hatchet/hatchet-migrate"]
+    environment:
+      DATABASE_URL: *hatchet-database-url
+    depends_on:
+      hatchet-db:
+        condition: service_healthy
+
+  # Writes the config the engine and the dashboard read, on each start, from
+  # Hatchet's settings above. The encryption keys and the cookie secrets are
+  # generated once and kept in hatchet-config: without them, the API tokens
+  # already issued stop working. It also creates the admin, once: a later
+  # change to HATCHET_ADMIN_PASSWORD does not change the admin's password.
+  hatchet-setup:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-admin:v0.110.5
+    command:
+      - /hatchet/hatchet-admin
+      - quickstart
+      - --skip
+      - certs
+      - --generated-config-dir
+      - /hatchet/config
+      - --overwrite=false
+    environment:
+      <<: *hatchet-environment
+      ADMIN_EMAIL: ${HATCHET_ADMIN_EMAIL:?Variable not set}
+      ADMIN_PASSWORD: ${HATCHET_ADMIN_PASSWORD:?Variable not set}
+    volumes:
+      - hatchet-config:/hatchet/config
+    depends_on:
+      hatchet-db:
+        condition: service_healthy
+      hatchet-migrate:
+        condition: service_completed_successfully
+
+  # The engine's gRPC port stays off the host: only the workers in this
+  # compose reach it, at HATCHET_GRPC_BROADCAST_ADDRESS.
+  hatchet-engine:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:v0.110.5
+    restart: always
+    command: ["/hatchet/hatchet-engine", "--config", "/hatchet/config"]
+    environment: *hatchet-environment
+    volumes:
+      - hatchet-config:/hatchet/config
+    depends_on:
+      hatchet-db:
+        condition: service_healthy
+        restart: true
+      hatchet-setup:
+        condition: service_completed_successfully
+
+  hatchet-dashboard:
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-dashboard:v0.110.5
+    restart: always
+    command: ["sh", "./entrypoint.sh", "--config", "/hatchet/config"]
+    environment: *hatchet-environment
+    volumes:
+      - hatchet-config:/hatchet/config
+    depends_on:
+      hatchet-db:
+        condition: service_healthy
+        restart: true
+      hatchet-setup:
+        condition: service_completed_successfully
+    ports:
+      - "8080:80"
+
 volumes:
   db-data:
+  hatchet-db-data:
+  hatchet-config:
