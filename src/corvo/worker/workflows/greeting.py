@@ -11,7 +11,12 @@ the core and spawns or reads runs, holding no logic of its own.
 
 A step that waits on a child run declares retries=0 and
 WAITING_EXECUTION_TIMEOUT, and every other step passes the defaults; the
-reasons are in corvo.worker.defaults.
+reasons are in corvo.worker.defaults. While it waits, the step holds a
+worker slot its child cannot use: when every slot holds a waiting step, the
+children never start and fail on Hatchet's scheduling timeout. A step that
+spawns many children, or waits long, belongs in a durable task, which
+Hatchet can evict to free its slot while it waits.
+https://docs.hatchet.run/v1/durable-tasks.md
 
 Declare the workflow and its steps at module top level and add the workflow
 to WORKFLOWS in corvo.worker.worker. Keep Hatchet's by-name stubs out of this
