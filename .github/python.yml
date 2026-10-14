@@ -1,8 +1,21 @@
 # The organization's Python checks (thatsnotmynameio/github-actions'
 # python.yml) read this file from a pull request's base commit: a change here
 # applies once it merges.
-# The systems the tests run on.
-systems: [linux]
 # The least total coverage, in percent, of the statements and branches the
-# tests cover on Linux.
+# tests cover.
 coverage: 90
+# Trunk Flaky Tests' test collections, each with the pytest arguments that
+# pick its tests: one for each directory of tests/, and the last one for the
+# rest (test_settings.py and any test outside them). Each runs in a job of its
+# own, and its results go to its collection.
+trunk:
+  - collection: 29TSvQtU # corvo-core
+    pytest: [tests/core]
+  - collection: iEWIqdL3 # corvo-integration
+    pytest: [tests/integration]
+  - collection: yQxWQ7gk # corvo-server
+    pytest: [tests/server]
+  - collection: Sz6YOghs # corvo-worker
+    pytest: [tests/worker]
+  - collection: IJbTawYj # corvo
+    pytest: [tests, --ignore=tests/core, --ignore=tests/integration, --ignore=tests/server, --ignore=tests/worker]
