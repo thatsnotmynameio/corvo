@@ -11,7 +11,7 @@ directory without __init__.py, or a module that fails to import.
 import importlib
 import pkgutil
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -66,7 +66,7 @@ def definitions(modules: Iterable[ModuleType]) -> list[Definition]:
 
 
 def problems(
-    defined: Iterable[Definition], registered: list[BaseWorkflow[Any]]
+    defined: Sequence[Definition], registered: list[BaseWorkflow[Any]]
 ) -> list[str]:
     labels = {id(workflow): label for label, workflow in defined}
     every = {id(workflow): workflow for _, workflow in defined}
@@ -111,25 +111,6 @@ def module(name: str, **attributes: object) -> ModuleType:
 async def example(input: EmptyModel, ctx: Context) -> None: ...
 
 
-def test_every_definition_in_the_areas_is_registered() -> None:
-    roots = [Path(path) for area in AREAS for path in area.__path__]
-
-    found = unpackaged(roots) + problems(definitions(area_modules(AREAS)), WORKFLOWS)
-
-    assert found == []
-
-
-def test_a_definition_missing_from_the_list_is_named() -> None:
-    defined = definitions([module("area.example", example=example)])
-
-    found = problems(defined, [])
-
-    assert found == [
-        "area.example.example (registration-example) is on no worker: "
-        "add it to WORKFLOWS"
-    ]
-
-
 @hatchet.task(name="dup")
 async def first_dup(input: EmptyModel, ctx: Context) -> None: ...
 
@@ -147,6 +128,25 @@ dag = hatchet.workflow(name="registration-dag")
 
 @dag.task()
 async def step(input: EmptyModel, ctx: Context) -> None: ...
+
+
+def test_every_definition_in_the_areas_is_registered() -> None:
+    roots = [Path(path) for area in AREAS for path in area.__path__]
+
+    found = unpackaged(roots) + problems(definitions(area_modules(AREAS)), WORKFLOWS)
+
+    assert found == []
+
+
+def test_a_definition_missing_from_the_list_is_named() -> None:
+    defined = definitions([module("area.example", example=example)])
+
+    found = problems(defined, [])
+
+    assert found == [
+        "area.example.example (registration-example) is on no worker: "
+        "add it to WORKFLOWS"
+    ]
 
 
 def test_two_definitions_sharing_a_name_are_both_named() -> None:
