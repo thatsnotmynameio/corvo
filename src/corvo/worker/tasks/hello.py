@@ -5,8 +5,9 @@ Hatchet. The task is a thin shell: it adapts Hatchet's input and output to
 the core and holds no logic of its own.
 
 Declare each task at module top level, passing the defaults from
-corvo.worker.defaults. Keep Hatchet's by-name stubs out of this area: a stub
-is a workflow too, and the worker registers every one declared here.
+corvo.worker.defaults, and register it with the worker. Keep Hatchet's
+by-name stubs out of this area: a stub is a workflow too, and every workflow
+here is one the worker must serve.
 """
 
 from hatchet_sdk import Context
