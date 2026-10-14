@@ -6,6 +6,7 @@ from hatchet_sdk.runnables.workflow import BaseWorkflow
 from corvo.worker.hatchet_client import hatchet
 from corvo.worker.tasks.hello import hello
 from corvo.worker.workflows.greeting import greeting
+from corvo.worker.workflows.greeting_rounds import greeting_rounds
 
 # Every task and workflow corvo-worker serves, one line each.
 # tests/worker/test_registration.py fails, naming the definition, when one in
@@ -13,6 +14,7 @@ from corvo.worker.workflows.greeting import greeting
 WORKFLOWS: list[BaseWorkflow[Any]] = [
     hello,
     greeting,
+    greeting_rounds,
 ]
 
 
