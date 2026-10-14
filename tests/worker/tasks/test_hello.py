@@ -1,4 +1,4 @@
-from corvo.worker.workflows.hello import HelloInput, HelloOutput, hello
+from corvo.worker.tasks.hello import HelloInput, HelloOutput, hello
 
 
 async def test_hello_greets_by_name() -> None:

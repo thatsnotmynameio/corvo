@@ -1,7 +1,7 @@
 import pytest
 from hatchet_sdk import Hatchet
 
-from corvo.worker.workflows.hello import HelloInput, HelloOutput
+from corvo.worker.tasks.hello import HelloInput, HelloOutput
 
 
 @pytest.mark.usefixtures("worker")
