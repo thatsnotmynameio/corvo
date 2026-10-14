@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -16,6 +16,7 @@ from corvo.worker.tasks.hello import HelloInput, HelloOutput, hello
 from corvo.worker.workflows.greeting import GreetingInput, greeting
 from corvo.worker.workflows.greeting_rounds import (
     APPROVAL_EVENT,
+    APPROVAL_LOOKBACK,
     GreetingRoundsInput,
     GreetingRoundsOutput,
     greeting_rounds,
@@ -174,6 +175,32 @@ async def test_the_wait_matches_the_runs_approval_key_or_sleeps(
     assert event.consider_events_since is not None
     assert isinstance(sleep, SleepCondition)
     assert sleep.duration == timedelta(seconds=42)
+
+
+@pytest.mark.usefixtures("replaced_greeting")
+async def test_the_lookback_counts_from_the_runs_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
+    clock = [start]
+
+    async def now(ctx: DurableContext) -> datetime:
+        return clock[0]
+
+    async def slow_hello(input: HelloInput) -> HelloOutput:
+        clock[0] += timedelta(hours=1)
+        return HelloOutput(message=f"Hi, {input.name}.")
+
+    monkeypatch.setattr(DurableContext, "aio_now", now)
+    monkeypatch.setattr(hello, "aio_run", slow_hello)
+    wait = replace_wait(monkeypatch, matched="approved")
+
+    await greeting_rounds.aio_mock_run(rounds_input(max_rounds=3))
+
+    # An approval pushed while slow rounds ran still matches.
+    [group] = wait.conditions
+    [event, _] = group.conditions
+    assert event.consider_events_since == start - APPROVAL_LOOKBACK
 
 
 @pytest.mark.usefixtures("replaced_greeting")

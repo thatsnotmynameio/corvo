@@ -49,8 +49,8 @@ from corvo.worker.workflows.greeting import GreetingInput, ShoutOutput, greeting
 
 APPROVAL_EVENT = "greeting:approved"
 
-# An approval pushed this long before the wait began still counts, so one
-# pushed while the rounds ran is not lost.
+# An approval pushed this long before the run began still counts, so one
+# pushed as the run was triggered is not lost.
 APPROVAL_LOOKBACK = timedelta(minutes=5)
 
 
@@ -83,6 +83,10 @@ class GreetingRoundsOutput(BaseModel):
 async def greeting_rounds(
     input: GreetingRoundsInput, ctx: DurableContext
 ) -> GreetingRoundsOutput:
+    # Taken before any spawn, so an approval pushed while the rounds ran
+    # still counts, however long they took.
+    approvals_since = await ctx.aio_now() - APPROVAL_LOOKBACK
+
     message = (await hello.aio_run(HelloInput(name=input.name))).message
     rounds = 1
     while core.needs_another_round(
@@ -94,7 +98,6 @@ async def greeting_rounds(
     result = await greeting.aio_run(GreetingInput(name=message))
     shout = ShoutOutput.model_validate(result["shout"])
 
-    since = await ctx.aio_now() - APPROVAL_LOOKBACK
     matched = await ctx.aio_wait_for(
         "approval",
         or_(
@@ -103,7 +106,7 @@ async def greeting_rounds(
                 expression=f"input.approval_key == '{input.approval_key}'",
                 readable_data_key="approved",
                 scope=f"approval_key:{input.approval_key}",
-                consider_events_since=since,
+                consider_events_since=approvals_since,
             ),
             SleepCondition(
                 timedelta(seconds=input.approval_timeout_seconds),
