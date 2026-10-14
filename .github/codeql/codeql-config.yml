@@ -1,0 +1,8 @@
+# CodeQL's configuration for security.yml's codeql jobs, read from a pull
+# request's base commit (thatsnotmynameio/github-actions' codeql.yml), so a
+# change here applies once it merges, never to the pull request that makes it.
+# security-extended, not security-and-quality: ruff owns the quality findings.
+name: corvo
+
+queries:
+  - uses: security-extended
