@@ -1,15 +1,16 @@
 # Each push to main: the Python project's checks, through the organization's
-# workflow (thatsnotmynameio/github-actions' python.yml). On Linux and macOS it
-# checks that uv.lock is current, then runs ruff's formatting and lint and the
-# tests with coverage; Linux also checks the coverage floor of
-# .github/python.yml and uploads ruff's findings to code scanning. The build of
-# the package and image follows. The push gives code scanning the analysis of
-# main that a pull request's ruff alerts are compared against. Without
+# workflow (thatsnotmynameio/github-actions' python.yml), on Linux. It checks
+# that uv.lock is current, runs ruff's formatting and lint and mypy, then the
+# tests with coverage, in a job for each of Trunk's test collections, and the
+# coverage floor of .github/python.yml; ruff's findings go to code scanning
+# and the tests' results to Trunk. The build of the package and image follows.
+# The push gives code scanning the analysis of main that a pull request's ruff
+# alerts are compared against, and Trunk the results of main. Without
 # pyproject.toml there is nothing to check.
 # On a pull request the organization's ruleset runs the same workflow, as the
-# check "tnmn.io: python", with .github/python.yml and ruff.toml from the base
-# commit: a change to them applies once it merges. actionlint runs on every
-# pull request the same way, as the check "tnmn.io: actionlint".
+# checks "tnmn.io: python (…)", with .github/python.yml and ruff.toml from the
+# base commit: a change to them applies once it merges. actionlint runs on
+# every pull request the same way, as the check "tnmn.io: actionlint".
 name: CI
 
 on:
@@ -30,4 +31,7 @@ jobs:
     permissions:
       contents: read
       security-events: write # uploads ruff's findings to code scanning
-    uses: thatsnotmynameio/github-actions/.github/workflows/python.yml@4339553065e0e0653a3a524a343d79dd816f09a0 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/python.yml@a462c274a33173daef92da67ba502f503a8933bf # main
+    secrets:
+      # Trunk's organization token: main's test results go to Trunk.
+      TRUNK_API_TOKEN: ${{ secrets.TRUNK_API_TOKEN }}
