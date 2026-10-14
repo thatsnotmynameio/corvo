@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Tests and linters
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Agents' local state (the shared instructions in .claude/ are committed)
+.claude/settings.local.json
+.claude/autoharness/
+.claude/worktrees/
+.remember/
+.context/compound-engineering/
+
+# Local settings, such as .crew/config.local.yaml and
+# .compound-engineering/config.local.yaml
+*.local*

@@ -1,0 +1,545 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/thatsnotmynameio/crew/main/schema/config.schema.json
+poll_interval_seconds: 60
+max_parallel_issues: 7
+queues:
+  clerk: 1
+  opus: 2
+  sonnet: 1
+tracker:
+  name: github
+  bot: clerk
+agents:
+  clerk:
+    harness:
+      name: claude
+      model: claude-sonnet-5-5
+    bot: clerk
+  product-manager:
+    harness:
+      name: claude
+      model: claude-opus-5-5
+    bot: product-manager
+  product-manager-jr:
+    harness:
+      name: claude
+      model: claude-sonnet-5-5
+    bot: product-manager
+  claude-developer:
+    harness:
+      name: claude
+      model: claude-opus-5-5
+    bot: developer
+  claude-developer-jr:
+    harness:
+      name: claude
+      model: claude-sonnet-5-5
+    bot: developer
+actions:
+  # Fails unless an open pull request from this repository, on the
+  # worktree's branch, has the line that closes the issue. It echoes its own
+  # reason last: that line reaches the issue's status comment.
+  pr-closes-issue: |-
+    sh "$HOME/.config/crew/scripts/pr-closes-issue.local.sh"
+  # Publishes the split the session before it wrote, as that session's bot.
+  # It reads the outcome on the last line of the session's last message,
+  # `split: <outcome>`, and passes without publishing anything on any outcome
+  # but `split`. On `split` it reads issues.json and the part files under
+  # docs/splitting/brainstorm/issue-N/, whose parts go to
+  # crew:planning:ready, or docs/splitting/plan/issue-N/, whose parts go to
+  # crew:relationship:ready. It creates each part as a sub-issue of the
+  # issue, with a marker naming the part, records the blocked_by links
+  # between parts, then labels the parts, so no part starts before its links
+  # exist. Last, it appends a split record to the issue's body, which the
+  # split skills skip and relationship leaves out, and takes every `crew:`
+  # label off the issue. Run again, it reuses the parts it finds by their
+  # marker and the links GitHub already has. It echoes its own reason last.
+  publish-split: |-
+    sh "$HOME/.config/crew/scripts/publish-split.local.sh"
+  # Puts the plan the plan session wrote into the issue's body, which the
+  # split and the development read. It reads the plan's path from the run's
+  # notes directory, `$(git rev-parse --git-dir)/planning/plan-path`, drops
+  # the plan's frontmatter, and fails when the plan has no
+  # `## Implementation Units` section or is above the 65,536 characters
+  # GitHub takes in a body. It keeps the old body in a comment whose first
+  # line is `Body before ce-plan:`, then replaces the body. Run again on a
+  # body that already holds the plan, it changes nothing. It echoes its own
+  # reason last.
+  plan-to-body: |-
+    sh "$HOME/.config/crew/scripts/plan-to-body.local.sh"
+  # Exits 3, the verdict single, when the implementation plan in the issue's
+  # body has one unit: a unit is never cut, so there is nothing to split. It
+  # echoes its own reason last.
+  plan-units:
+    script: |-
+      sh "$HOME/.config/crew/scripts/plan-units.local.sh"
+    verdicts:
+      3: single
+  # Puts the implementation plan in the issue's body into
+  # docs/plans/<date>-issue-N-plan.md, which the pull request commits, and
+  # starts the run's notes directory, `$(git rev-parse --git-dir)/development`,
+  # with the plan's path and the branch's base. It exits 3, the verdict
+  # unplanned, when the body has no `## Implementation Units` section. It
+  # echoes its own reason last.
+  plan-from-issue:
+    script: |-
+      sh "$HOME/.config/crew/scripts/plan-from-issue.local.sh"
+    verdicts:
+      3: unplanned
+  # The merge gate. Passes when the pull request pr-of-issue found is open,
+  # mergeable and clean, asking again at most 3 times while GitHub has not
+  # computed it, and its last word is crew-developer's comment ending with
+  # `<!-- crew: stopped watching -->`, the marker the babysit writes when it
+  # stops. The last word is the latest comment or review, leaving out
+  # crew-clerk's and those of the bots that only report checks
+  # (codacy-production, trunk-io, github-actions). Otherwise it posts one
+  # comment on the pull request saying which of the two did not hold, and
+  # fails. It echoes its own reason last.
+  merge-gate: |-
+    sh "$HOME/.config/crew/scripts/merge-gate.local.sh"
+  # Writes the number of the one open pull request from this repository that
+  # closes the issue to `$(git rev-parse --git-dir)/pull-request`, where the
+  # actions after it read it. It finds it through the link GitHub keeps on
+  # the issue from the pull request's `Closes` line, without reading any
+  # body. It exits 3, the verdict no_pr, when no open pull request or more
+  # than one closes the issue. It echoes its own reason last.
+  pr-of-issue:
+    script: |-
+      sh "$HOME/.config/crew/scripts/pr-of-issue.local.sh"
+    verdicts:
+      3: no_pr
+  # Checks out, in the worktree, the pull request pr-of-issue found, on its
+  # own branch, so a plain `git push` updates it. The development run's
+  # worktree still holds that branch, and git refuses a branch another
+  # worktree holds, so it first checks the branch out with
+  # --ignore-other-worktrees when it exists here. It echoes its own reason
+  # last.
+  pr-checkout: |-
+    sh "$HOME/.config/crew/scripts/pr-checkout.local.sh"
+  # Passes when the pull request pr-of-issue found is open and GitHub says it
+  # is mergeable and clean. While GitHub has not computed it yet, it asks
+  # again, at most 3 times. It echoes its own reason last.
+  pr-mergeable: |-
+    sh "$HOME/.config/crew/scripts/pr-mergeable.local.sh"
+  # Passes when the pull request pr-of-issue found has merged. It echoes its
+  # own reason last.
+  pr-merged: |-
+    sh "$HOME/.config/crew/scripts/pr-merged.local.sh"
+  # Fails after an lfg session that says it is still waiting on work it
+  # started (tests, CI, reviewers, a watcher) or stopped without doing the
+  # work, as TypeSafe's Jev judges from the session's prompt and last
+  # message. It sends both to TypeSafe, in one request that asks one Choice
+  # twice, its options in opposite orders, and averages the two answers.
+  # Unfinished and stopped together at fail_at or more fail the action;
+  # otherwise it passes, saying needs a person when that clears person_at,
+  # or done. It passes without a judgment when the last message is empty
+  # or TypeSafe cannot answer, and fails when TYPESAFE_API_KEY is not set.
+  # It echoes only an outcome and its probability, never what the session
+  # or TypeSafe said, so the status comment shows nothing of the session.
+  # The model is pinned to the version the thresholds were measured on.
+  session-finished: |-
+    sh "$HOME/.config/crew/scripts/session-finished.local.sh"
+  # Prepares the development's review as ce-code-review's orchestrator
+  # would, without a session. It finds the ce-code-review skill of the
+  # installed compound-engineering plugin, makes a run directory where the
+  # skill's peer runner looks for it, and records its path in
+  # `$(git rev-parse --git-dir)/development/review-run`. It writes there the
+  # whole branch since the base in `base` as `full.diff`, committed and in
+  # the working tree, the changed files, and each reviewer's prompt, the
+  # skill's own template filled with the skill's persona, scope rules and
+  # findings schema. It fails when the branch changes nothing since its
+  # base. It echoes its own reason last.
+  review-prepare: |-
+    sh "$HOME/.config/crew/scripts/review-prepare.local.sh"
+  # Collects the Codex adversarial review the review session started with
+  # review-peer-start.local.sh: it waits for the job up to the deadline the
+  # skill's runner derives, within this action's ten minutes, reaps it past
+  # that, reads its artifact through the runner and deletes the job. It
+  # writes the outcome in the run directory as `peer.json` and always
+  # passes: a review Codex did not produce is named there, and review-merge
+  # runs the in-process adversarial reviewer instead. It echoes its own
+  # reason last.
+  review-peer: |-
+    sh "$HOME/.config/crew/scripts/review-peer.local.sh"
+rules:
+  promote brainstorm:
+    queue: clerk
+    labels:
+      ready: "crew:brainstorm:done"
+      running: "crew:brainstorm:promoting"
+    routes:
+      passed: "crew:splitting:ready"
+
+  splitting:
+    queue: opus
+    labels:
+      ready: "crew:splitting:ready"
+      running: "crew:splitting:in progress"
+    actions:
+      - agent: product-manager
+        name: split
+        prompt: |-
+          Run `/cw-split-brainstorm {{.Issue.Ref}}`. You run headless: nobody answers questions, so decide and report.
+
+          Change nothing on GitHub: create, edit, label and comment on no issue. publish-split, the shell action after you, publishes the parts the skill writes.
+
+          End your last message with the skill's report, then its outcome alone on the last line, as `split: <outcome>`, such as `split: split` or `split: not split`.
+      - publish-split
+    routes:
+      passed: "crew:planning:ready"
+      failed:
+        - report
+        - move: "crew:splitting:failed"
+
+  planning:
+    queue: opus
+    labels:
+      ready: "crew:planning:ready"
+      running: "crew:planning:in progress"
+    actions:
+      - agent: claude-developer
+        name: plan
+        on:
+          blocked: failed
+        prompt: |-
+          Plan the implementation of {{.Issue.Ref}}, a brainstormed feature or a part of one, and put the plan in its body. You run headless: nobody answers questions, so decide and report.
+
+          1. Run `/compound-engineering:ce-plan {{.Issue.Ref}}`. Nobody can answer its questions: it records each open product fork as an explicit assumption in the plan. In this repository Sonnet is the established cheaper capable tier for reading the code: dispatch its `repo-research-analyst` with `model: sonnet`. Its other subagents keep the models its own rules give them.
+          2. If it returns `status: blocked`, `settled-decision-invalidated` included, stop, even when a plan file exists: post one comment on {{.Issue.Ref}} with its `phase`, `blocker` and `recovery_path`, write `blocked` on the first line of the file `CREW_VERDICT_FILE` names, and end.
+          3. If it returns neither a blocker nor the path of a plan it wrote in this session, run it once more with the same arguments. A file already under `docs/plans/` that it did not report writing is not its plan.
+          4. Read the plan. It must describe a code change, with its scope, direction and verification, and leave no question that blocks starting. Otherwise stop as in 2, saying what it lacks.
+          5. Record the plan's path, relative to the worktree's root, as the only line of the file `plan-path` in the run's notes directory. Find that directory in Bash: `echo "$(git rev-parse --absolute-git-dir)/planning"` prints its absolute path; create it if it is missing. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. plan-to-body, the shell action after you, checks the plan's `## Implementation Units` section and its size and puts it in the issue's body.
+          6. Edit no issue's body, add or remove no label, commit nothing and push nothing.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - plan-to-body
+      - plan-units:
+        on:
+          single: passed
+      - agent: claude-developer
+        name: split
+        prompt: |-
+          Run `/cw-split-ce-plan {{.Issue.Ref}}`. You run headless: nobody answers questions, so decide and report.
+
+          Change nothing on GitHub: create, edit, label and comment on no issue. publish-split, the shell action after you, publishes the parts the skill writes.
+
+          End your last message with the skill's report, then its outcome alone on the last line, as `split: <outcome>`, such as `split: split` or `split: not split`.
+      - publish-split
+    routes:
+      passed: "crew:relationship:ready"
+      failed:
+        - report
+        - move: "crew:planning:failed"
+
+  relationship:
+    queue: sonnet
+    labels:
+      ready: "crew:relationship:ready"
+      running: "crew:relationship:in progress"
+    actions:
+      - agent: product-manager-jr
+        name: relate
+        prompt: |-
+          {{.Issue.Ref}} is planned. Find which open issues block it and which it blocks. You run headless: nobody answers questions, so decide and report.
+
+          1. Read it (`gh issue view {{.Issue.Key}} --comments`) and the dependencies GitHub already has for it (`gh api repos/{owner}/{repo}/issues/{{.Issue.Key}}/dependencies/blocked_by` and `.../blocking`). When it is a sub-issue (`gh api repos/{owner}/{repo}/issues/{{.Issue.Key}}/parent`), its parent and the parent's other sub-issues come from the same split: the links between them are the split's, so leave them as they are.
+          2. Compare {{.Issue.Ref}} only with the other open issues crew takes: those opened by each login in `$CREW_CODE_OWNERS` and `$CREW_BOTS`, both lists separated by spaces. Pass a bot's `<slug>[bot]` login as it is. Leave out the issues someone else opened, {{.Issue.Ref}}, its parent and the parent's other sub-issues, and every issue whose body holds `<!-- cw-split-plan: split record -->`: a split parent is never built, so a dependency on work it describes goes on the part that carries that work. List them by number and title only, without reading their bodies: `for login in $CREW_CODE_OWNERS $CREW_BOTS; do gh issue list --state open --author "$login" --limit 500 --json number,title,body --jq '.[] | select(.body // "" | contains("<!-- cw-split-plan: split record -->") | not) | "#\(.number) \(.title)"'; done`. Then run `/cw-rank-blockers {{.Issue.Ref}}`: it prints the 5 open issues most likely to block it and the 5 it most likely blocks. Read in full (`gh issue view M`) only the issues on its two lists, and any other issue on the title list whose title suggests a relation. The lists only order candidates, so decide each dependency yourself. When `/cw-rank-blockers` fails, its shortlist is unavailable: read every one of these issues in full instead (`for login in $CREW_CODE_OWNERS $CREW_BOTS; do gh issue list --state open --author "$login" --limit 500 --json number,title,body,labels; done`), and keep the script's error line for your closing comment.
+          3. For each of them, decide whether it must be done before {{.Issue.Ref}} (it blocks {{.Issue.Ref}}) or cannot be done before it ({{.Issue.Ref}} blocks it). Record each as a GitHub dependency: `gh api -X POST repos/{owner}/{repo}/issues/N/dependencies/blocked_by -F issue_id=ID`, where N is the blocked issue's number and ID is the blocking issue's `id` (from `gh api repos/{owner}/{repo}/issues/M`), not its number. Record only dependencies between {{.Issue.Ref}} and another issue, only when you can say why, skip one GitHub already has, and never record one that closes a cycle.
+          4. When one of the dependencies of {{.Issue.Ref}} no longer holds, remove it: `gh api -X DELETE repos/{owner}/{repo}/issues/N/dependencies/blocked_by/ID`, with N and ID as in step 3. Remove only a dependency between {{.Issue.Ref}} and another issue outside its split, and only when you can say why it no longer holds.
+          5. Add or remove no label that starts with `crew:`, on any issue. Open, close or edit no issue. Do not change code, push a branch or open a pull request.
+          6. End with one comment on {{.Issue.Ref}}: whether its shortlist from `/cw-rank-blockers` was used or unavailable, quoting the script's error line when unavailable; what blocks it and what it blocks, marking the dependencies you recorded and why; each dependency you removed and why; whether an open issue still blocks it, in which case crew starts its development only once every blocker is closed; the issues it likely duplicates; and every command that failed or was denied, with its error.
+    routes:
+      passed: "crew:development:ready"
+      failed:
+        - report
+        - move: "crew:relationship:failed"
+  # Proposal: development runs lfg's steps after planning as one session
+  # each, in place of one lfg session, and ends once the pull request is
+  # open. plan-from-issue takes the plan from the issue's body, which
+  # planning wrote, and sends an issue without one to crew:planning:ready.
+  # The sessions share the run's worktree, not their conversations: each
+  # leaves what the later ones need in the run's notes directory,
+  # `$(git rev-parse --git-dir)/development`, which git keeps out of every
+  # commit. A step whose gate fails comments why on the issue and ends with
+  # the verdict `blocked`, which ends the run through failed; when the issue
+  # returns to crew:development:ready, the run resumes at that step. lfg's
+  # learning step is a session of its own, compound, between applying the
+  # review and shipping, so the learning is in the pull request when it
+  # opens. lfg's browser test is left out, as crew has no web page, and so is its
+  # babysit: the merge gate sends a pull request no one stopped watching to
+  # crew:code-review:ready, where the code review rule babysits it.
+  development:
+    queue: opus
+    labels:
+      ready: "crew:development:ready"
+      running: "crew:development:in progress"
+    actions:
+      - plan-from-issue:
+        on:
+          unplanned: unplanned
+      - agent: claude-developer
+        name: work
+        on:
+          blocked: failed
+        prompt: |-
+          Step 1 of 6 of the development of {{.Issue.Ref}}: implement its plan. Each step runs as its own session; the run's notes directory, `<notes>`, holds what the earlier ones left. Its `plan-path` file names the plan. Find `<notes>` first, in Bash: `echo "$(git rev-parse --absolute-git-dir)/development"` prints its absolute path. Use that path for every read and write of the notes. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. You run headless: nobody answers questions, so decide and report.
+
+          1. Run `/compound-engineering:ce-work mode:return-to-caller <the plan's path>`.
+          2. Only `status: complete` goes on. Any other status, or a return without the fields of ce-work's complete return (`changed_files`, `verification_results`, `verification_evidence`, `settled_decision_conflicts`, `behavior_change` and `run_id` among them), stops the run: post one comment on {{.Issue.Ref}} with its status, blockers and `recovery_path`, write `blocked` on the first line of the file `CREW_VERDICT_FILE` names, and end.
+          3. When `behavior_change` is true and `verification_evidence` does not say how the behaviour was protected (the tests inspected, added or changed, the failure seen before the change, the run), invoke ce-work once more with the same plan path, adding `implementation_run:<run_id>` when `run_id` is not null. It fills in the evidence without implementing again. If the evidence is still missing, stop as in 2, naming the missing fields.
+          4. Save its whole return as `<notes>/work.md`. Push nothing.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - session-finished
+      - agent: claude-developer
+        name: simplify
+        prompt: |-
+          Step 2 of 6 of the development of {{.Issue.Ref}}: simplify the code this branch changed, before it is reviewed. Each step runs as its own session; the run's notes directory, `<notes>`, holds what the earlier ones left: the plan's path in `plan-path` and the branch's base in `base`. Find `<notes>` first, in Bash: `echo "$(git rev-parse --absolute-git-dir)/development"` prints its absolute path. Use that path for every read and write of the notes. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. You run headless: nobody answers questions, so decide and report.
+
+          1. Diff the branch against its base, working tree included: `git diff <base>`. If it only touches docs, or changes fewer than about 10 lines, skip this step: end saying so.
+          2. Run `/compound-engineering:ce-simplify-code`. Its scope is that diff, most of it already committed. Give it the plan as the structure the simplification must keep, not as its scope, with this constraint: the plan's key technical decisions labeled `session-settled:` describe structure to preserve, so deliberate duplication stays duplicated.
+          3. Commit nothing: its changes stay in the working tree, the review reads them there, and the pull request commits them.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      # Step 3 is ce-code-review's full review split into actions: the shell
+      # actions do its mechanics, and two short sessions do the judgment its
+      # orchestrator did, without loading the skill. The reviewers, their
+      # prompts and models, the Codex adversarial review, the merge rules and
+      # the validator stay ce-code-review's own.
+      - review-prepare
+      - agent: claude-developer
+        name: review
+        on:
+          blocked: failed
+        prompt: |-
+          Step 3 of 6 of the development of {{.Issue.Ref}}: review the branch, first part: run the reviewers. Each step runs as its own session; the run's notes directory, `<notes>`, holds what the earlier ones left: the plan's path in `plan-path` and the branch's base in `base`. Find `<notes>` first, in Bash: `echo "$(git rev-parse --absolute-git-dir)/development"` prints its absolute path. Use that path for every read and write of the notes. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. You run headless: nobody answers questions, so decide and report.
+
+          review-prepare, the shell action before you, prepared ce-code-review's run directory, whose absolute path is in `<notes>/review-run` (`<run>` below). It holds `full.diff`, the whole branch since the base, committed and in the working tree; `files.txt`, the changed files; `skill-dir`, the directory of the ce-code-review skill (`<skill>` below); and `prompts/<reviewer>.md`, each reviewer's whole prompt, already filled in. You do only the part of ce-code-review's orchestrator that needs judgment: do not run `/compound-engineering:ce-code-review`, and read none of its references but the one named below.
+
+          1. In one wave of parallel reads, read the plan, `<run>/files.txt`, `<run>/full.diff` and `<skill>/references/persona-catalog.md`.
+          2. Write `<run>/intent.md`: two or three lines on what the branch sets out to do, from the plan and the diff. Every reviewer reads it.
+          3. Scan the diff once for obvious, high-signal defects only: broken control flow, a swapped argument or off-by-one, an enum or status added without its sibling switch, a nil dereference the diff makes reachable, an unsafe shell or SQL string. Write them to `<run>/returns/fast-pass.json` as one reviewer return, `{"reviewer": "fast-pass", "findings": [...], "residual_risks": [], "testing_gaps": []}`, each finding with `title`, `severity` (`P0` to `P3`), `file`, `line`, `confidence` (50 at most), `autofix_class`, `owner`, `requires_verification`, `pre_existing`, `suggested_fix` and `first_evidence`, the verbatim motivating line with `file:line`. Leave `findings` empty when nothing is obvious. Go no deeper: the reviewers do.
+          4. The adversarial lens applies when the catalog's `adversarial` row holds for the diff: at least 50 changed lines of executable code, tests left out, or persistence writes, event publication, retry or ordering semantics, an external API, or a check that could pass silently. When it applies:
+             - Write `<run>/adversarial-review-constraints.md`, at most 32 KiB: the criteria from AGENTS.md and the instructions in your context that apply to this change, in your own words, never copied raw; `none` when none apply.
+             - Write `<run>/adversarial-review-brief.md`, at most 32 KiB: the intent, then 2 to 8 risk divisions you choose from the diff, each with a one-line reason and representative paths, and any interaction between divisions the review must test. One division is enough for a simple change. Never the file list, diff hunks or a split by file extension.
+             - Run `sh "$HOME/.config/crew/scripts/review-peer-start.local.sh"` once. It starts Codex's adversarial review in the background and returns at once. Do not wait for it or check on it: review-peer, the shell action after you, collects it.
+          5. Select the reviewers by the catalog's selection rules, judging the diff, not matching keywords: `correctness` always; `project-standards` when an instruction file (AGENTS.md, or one closer to a changed file) governs a changed file; each conditional reviewer only when its surface is in the diff; `learnings-researcher` only when a quick search of `docs/solutions/` finds a plausible match for the changed modules. Never select `previous-comments`, as the branch has no pull request yet. Select `adversarial`, the in-process fallback, only when the lens applies and review-peer-start.local.sh said Codex did not start.
+          6. Launch every selected reviewer in one message, as parallel general-purpose subagents, each with the prompt `Read <run>/prompts/<reviewer>.md and follow it exactly.`, `<run>` written out. To `project-standards`'s prompt add each criteria file and the changed files it governs. `correctness`, `security` and `adversarial` run on your own model, with no model override; every other reviewer with the model `sonnet`. Wait until every one has returned.
+          7. Save each return verbatim: a JSON return in `<run>/returns/<reviewer>.json`, the prose return of `learnings-researcher` or `agent-native` in `<run>/<reviewer>.md`. Write each reviewer that failed or returned no valid JSON, with the reason, as a line of `<run>/failed.txt`.
+          8. Write `<run>/roster.json`: `{"selected": [the reviewers], "reasons": {"<reviewer>": "<one line on why it runs>"}, "adversarial": "peer" | "in-process" | "not applicable"}`.
+
+          Merge, validate and judge no finding, change no file of the worktree and commit nothing: review-merge, after review-peer, does that.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - review-peer
+      - agent: claude-developer
+        name: review-merge
+        on:
+          blocked: failed
+        prompt: |-
+          Step 3 of 6 of the development of {{.Issue.Ref}}: review the branch, second part: merge, validate and judge the reviewers' findings. Each step runs as its own session; the run's notes directory, `<notes>`, holds what the earlier ones left: the plan's path in `plan-path` and the branch's base in `base`. Find `<notes>` first, in Bash: `echo "$(git rev-parse --absolute-git-dir)/development"` prints its absolute path. Use that path for every read and write of the notes. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. You run headless: nobody answers questions, so decide and report.
+
+          ce-code-review's run directory, whose absolute path is in `<notes>/review-run` (`<run>` below), holds what the review session and review-peer left: `intent.md`; `roster.json`, the reviewers that ran and why; `returns/<reviewer>.json`, each reviewer's compact return, `fast-pass` among them; `<reviewer>.json`, each reviewer's full artifact; the prose returns of `learnings-researcher` and `agent-native` as `<reviewer>.md`; `failed.txt`, the reviewers that failed; and `peer.json`, the outcome of Codex's adversarial review and, when it produced one, the path of its artifact. `skill-dir` names the ce-code-review skill's directory (`<skill>` below). You do, in this one session, what ce-code-review's merge leaf, validator dispatch and report leaf do.
+
+          1. When `roster.json` says the adversarial lens ran through the peer and `peer.json` names no artifact, run the in-process fallback first: launch one general-purpose subagent on your own model with the prompt `Read <run>/prompts/adversarial.md and follow it exactly.`, `<run>` written out, and save its return in `<run>/returns/adversarial.json`.
+          2. Read `<skill>/references/finish-review.md` and follow its Stage 5, Stage 5b and Stage 6 for `mode:agent`, with no local apply: skip Stage 5c. Where it names a field of `finish-input.json`, use: the intent in `intent.md`; the roster in `roster.json`; the plan named in `<notes>/plan-path`; the scope, the whole branch since `<notes>/base`, committed and in the working tree, on this branch at `git rev-parse HEAD`; the peer in `peer.json`, its coverage named from its artifact as `<skill>/references/cross-model-review.md` Step 5 lists; `docs_root` `docs`; the run directory `<run>`. `raw-returns.json` is the array of the returns in `<run>/returns/`. finish-review.md says a leaf launches no subagents: here you are the only context, so you launch and collect the Stage 5b validator yourself, one subagent on your own model, as `<skill>/references/finish-input.md` "The validator (dispatch context)" states. Skip the stage log (`stages.jsonl`, `run-log.py`).
+          3. Write `<run>/review.json` as `<skill>/references/modes-and-output.md` "JSON output format" defines it, with `coverage.depth` `full`, `artifact_path` `<run>` and `run_id` the name of `<run>`.
+          4. If its `status` is `failed`, the run stops: post one comment on {{.Issue.Ref}} with its `reason`, write `blocked` on the first line of the file `CREW_VERDICT_FILE` names, and end.
+          5. A finding stamped `settled_conflict` whose evidence shows that the settled decision cannot work (infeasible, the wrong thing, or destructive) stops the run as in 4, with the finding in the comment. One that is a matter of preference does not stop it.
+          6. Save the review as `<notes>/review.md`: the parsed JSON (`status`, `actionable_findings`, `findings`, `artifact_path`, `run_id`), the `settled_conflict` stamps included. Change no other file and commit nothing.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - agent: claude-developer
+        name: apply review
+        prompt: |-
+          Step 4 of 6 of the development of {{.Issue.Ref}}: apply the review's eligible findings and write down the rest. Each step runs as its own session; the run's notes directory, `<notes>`, holds what the earlier ones left: the plan's path in `plan-path`, ce-work's return in `work.md` and the review in `review.md`. Find `<notes>` first, in Bash: `echo "$(git rev-parse --absolute-git-dir)/development"` prints its absolute path. Use that path for every read and write of the notes. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. You run headless: nobody answers questions, so decide and report.
+
+          1. Apply a finding only when all of these hold: it has a `suggested_fix`; its `confidence` is 100, or 75 with agreement across reviewers noted in the review; the fix is mechanical, one coherent change that touches no contract, permission, security stance or public API and changes no behaviour that needs a product decision; and the code at its `file:line` still matches its evidence. `autofix_class` is no permission: never apply an `advisory` finding, a `manual` one without a mechanical `suggested_fix`, or a `gated_auto` one that changes behaviour, contracts, auth or permissions.
+          2. Apply them in the review's severity order. Run the targeted tests when an applied finding has `requires_verification: true`.
+          3. If you changed files, stage only the files your fixes touched and commit them as `fix(review): apply review findings`. If no finding qualified, say so and commit nothing. Push nothing.
+          4. Write `<notes>/unapplied.md`, a `## Unapplied review findings` section with one checkbox per item: `- [ ] <severity> — <file:line> — <title>` for each actionable finding you did not apply, with its `suggested_fix` on the next line when it has one; the same line, plus the decision it conflicts with, for each finding stamped `settled_conflict`; and a line with the decision, the evidence and how it was routed for each proceeded-and-flagged entry of `settled_decision_conflicts` in `work.md`. End it with the review's `run_id` and `artifact_path`. When there is no such item, leave the file empty.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - agent: claude-developer
+        name: compound
+        prompt: |-
+          Step 5 of 6 of the development of {{.Issue.Ref}}: capture a learning, when the run produced one. Each step runs as its own session; the run's notes directory, `<notes>`, holds what the earlier ones left: the plan's path in `plan-path`, the branch's base in `base`, ce-work's return in `work.md`, the review in `review.md` and the findings left unapplied in `unapplied.md`. Find `<notes>` first, in Bash: `echo "$(git rev-parse --absolute-git-dir)/development"` prints its absolute path. Use that path for every read and write of the notes. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. You run headless: nobody answers questions, so decide and report.
+
+          1. Read the plan, `work.md`, `review.md` and `unapplied.md`, and the branch's change since its base, working tree included (`git diff <base>`): they are the evidence for the judgment below, as this session does not have the earlier ones' conversations.
+          2. Apply AGENTS.md's Capture rule: run `/compound-engineering:ce-compound mode:non-interactive` only when the run produced durable reasoning that the final code, tests and plan do not carry. When the change overturns a decision or an accepted risk that a plan in `docs/plans/` still states (grep for it), it does: plans are not updated after they ship. `Documentation skipped` is a success. Change no file other than what it writes, and commit nothing: the pull request commits it.
+          3. Write `<notes>/compound.md`: the path of each learning it wrote or updated and one line on what it records, or one line saying no learning qualified and why.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - agent: claude-developer-jr
+        name: ship
+        on:
+          blocked: failed
+        prompt: |-
+          Step 6 of 6 of the development of {{.Issue.Ref}}: open its pull request. Each step runs as its own session; the run's notes directory, `<notes>`, holds what the earlier ones left: the plan's path in `plan-path`, the branch's base in `base`, ce-work's return in `work.md`, the findings left unapplied in `unapplied.md` and the learning step's outcome in `compound.md`. Find `<notes>` first, in Bash: `echo "$(git rev-parse --absolute-git-dir)/development"` prints its absolute path. Use that path for every read and write of the notes. Never write to this worktree's `.git`: it is a file that links the worktree to git, not a directory. You run headless: nobody answers questions, so decide and report.
+
+          1. Record `git rev-parse origin/main` once and use that SHA for every rebase, merge and diff below: crew fetches while sessions run, so `origin/main` can move between two of your commands.
+          2. List the plans that landed on `main` since the base: `git diff --name-only <base> <that SHA> -- docs/plans`. When one names {{.Issue.Ref}}, or its parent (`gh api repos/{owner}/{repo}/issues/{{.Issue.Key}}/parent --jq .number`, which fails when it has none), and changes its requirements, defers it or plans it again, the run stops: post one comment on {{.Issue.Ref}} naming the plan and what it changes, write `blocked` on the first line of the file `CREW_VERDICT_FILE` names, and end.
+          3. Run `/compound-engineering:ce-commit-push-pr mode:pipeline branding:on`. Give it, as context for the pull request's description: the plan's path; the proceeded-and-flagged entries of `settled_decision_conflicts` in `work.md`; the section in `unapplied.md`, to be rendered verbatim as a section of its own when the file is not empty; the learning written or skipped, from `compound.md`; and the line `Closes {{.Issue.Ref}}`, which the body must contain so merging it closes the issue. It commits what the earlier steps left in the working tree, the notes directory never among it.
+          4. If a pull request already exists for this branch (`gh pr view --json number,url,state`), it only commits and pushes: then run it again in its description-update mode on that pull request, with the same context.
+          5. Check what the pull request carries: `git diff --stat <that SHA>...HEAD` must list only the branch's own files. Do not watch its checks: the code review rule babysits it.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - pr-closes-issue
+    routes:
+      passed: "crew:code-review:ready"
+      unplanned:
+        - comment: "{{.Issue.Ref}} has no implementation plan in its body, so it goes to planning first."
+        - move: "crew:planning:ready"
+      failed:
+        - report
+        - move: "crew:development:failed"
+
+  # The developer babysits the issue's pull request until it looks ready to
+  # merge. It ends in crew:code-review:done only when the session finished
+  # and the pull request is mergeable, so a pull request that cannot become
+  # mergeable stops in crew:code-review:failed instead of going round the
+  # merge gate again.
+  code review:
+    queue: opus
+    labels:
+      ready: "crew:code-review:ready"
+      running: "crew:code-review:in progress"
+    actions:
+      - pr-of-issue
+      - pr-checkout
+      - agent: claude-developer
+        name: babysit
+        prompt: |-
+          The pull request that closes {{.Issue.Ref}} is already checked out in this worktree, and its number, `N` below, is in the file `$(git rev-parse --absolute-git-dir)/pull-request`: read it with `cat` in Bash. Run `/compound-engineering:ce-babysit-pr N 30m posture:target` on it until it reaches a true stop. The `30m` is its budget: it stops sooner when the pull request looks ready. Never merge it.
+
+          You may mark a review thread resolved once you have dealt with it: you fixed what it asks for and pushed the fix, or you replied explaining why no change is needed. Resolve only those threads, never one that still waits on you or on someone else. Resolve with `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "ID"}) { thread { isResolved } } }'`. If GitHub refuses it, do not wait for the thread to resolve: name the threads left open in your report.
+
+          When the babysit stops, post its report on the pull request as your last comment, saying that you stopped watching the pull request, and end that comment with the line `<!-- crew: stopped watching -->`: the merge gate reads that marker, and moves the pull request on only when its latest comment carries it.
+
+          Codacy AI review posts only once. Do not wait for further comments.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command. Run it in the foreground, or wait for it with Monitor.
+      - session-finished
+      - pr-mergeable
+    routes:
+      passed: "crew:code-review:done"
+      failed:
+        - report
+        - move: "crew:code-review:failed"
+
+  # The merge gate, without a session. When a review ends, merge-gate looks
+  # at the issue's pull request and the last word on it. A pull request that
+  # is mergeable, whose last word is the developer's comment marked as the
+  # end of its watch, moves on to crew:code-merging:ready; any other goes
+  # back to crew:code-review:ready, where the developer babysits it again.
+  promote merging after review:
+    queue: clerk
+    labels:
+      ready: "crew:code-review:done"
+      running: "crew:code-review:promoting"
+    actions:
+      - pr-of-issue
+      - merge-gate
+    routes:
+      passed: "crew:code-merging:ready"
+      failed:
+        - report
+        - move: "crew:code-review:ready"
+
+
+  # The developer puts the issue's pull request in Trunk's merge queue with
+  # a `/trunk merge` comment and watches it until it merges. It changes no
+  # code: when anything goes wrong, it says why on the pull request and ends
+  # with the verdict review, which sends the issue back to
+  # crew:code-review:ready, where the code review rule fixes it. It ends in
+  # crew:code-merging:done only when pr-merged finds the pull request merged.
+  code merging:
+    queue: sonnet
+    labels:
+      ready: "crew:code-merging:ready"
+      running: "crew:code-merging:in progress"
+    actions:
+      - pr-of-issue:
+        on:
+          no_pr: review
+      - agent: claude-developer-jr
+        name: merge
+        on:
+          review: review
+        prompt: |-
+          Merge the pull request that closes {{.Issue.Ref}} through Trunk's merge queue, and watch it until it merges. You run headless: nobody answers questions, so decide and report.
+
+          You only watch. Change no code, commit nothing, push nothing, rebase nothing, resolve no review thread and rerun no check. When anything goes wrong, do nothing about it: send the issue back to review, as below, and the code review rule fixes it.
+
+          To send it back to review: post one comment on the pull request saying, in one or two sentences, what went wrong and that you stopped watching it; write `review` on the first line of the file `CREW_VERDICT_FILE` names; and end.
+
+          1. Read the pull request's number, `N` below, from the file `$(git rev-parse --absolute-git-dir)/pull-request`, with `cat` in Bash.
+          2. Read `gh pr view N --json state,mergeable,mergeStateStatus`. When it is already `MERGED`, skip to 5. While `mergeable` or `mergeStateStatus` is `UNKNOWN`, wait 10 seconds and read again, at most 3 times. Unless it is `MERGEABLE` and `CLEAN`, send it back to review.
+          3. Post a comment on it whose whole body is `/trunk merge` (`gh pr comment N --body "/trunk merge"`), once. Never merge it any other way.
+          4. Watch it, for at most 20 minutes, by running this command in the foreground, again and again. It checks every 15 seconds and returns as soon as the pull request stops being open, its merge state changes or a comment or review arrives, or after 5 minutes, and then prints the pull request. Run it as it is, with N replaced; never write a waiting loop of your own and never `sleep` on your own:
+
+             `s() { gh pr view N --json state,mergeStateStatus,comments,reviews --jq '[.state,.mergeStateStatus,(.comments|length),(.reviews|length)]|@tsv'; }; a=$(s); for i in $(seq 1 20); do sleep 15; b=$(s) || continue; [ "$b" != "$a" ] && break; done; gh pr view N --json state,mergeStateStatus,comments`
+
+             It merged when `state` is `MERGED`. Send it back to review as soon as any of these happens: Trunk takes it out of the queue or says it failed (`trunk-io`'s comments say why: quote them), it is `CLOSED` without merging, it stops being mergeable, or someone other than `trunk-io`, `crew-clerk` and the bots that only report checks comments or reviews it. If it has not merged after 20 minutes while it is still in the queue, leave it there and end without a verdict.
+          5. End with one comment on the pull request: merged, or still in Trunk's queue after 20 minutes, saying that you stopped watching it.
+
+          This session is headless: ending your turn ends the session, and nothing resumes it. Never end a turn waiting on a background command: run every command in the foreground.
+      - pr-merged
+    routes:
+      passed: "crew:code-merging:done"
+      review:
+        - comment: "{{.Issue.Ref}} goes back to code review: `{{.Action}}` ended with `{{.Verdict}}`. The pull request's last comment says why."
+        - move: "crew:code-review:ready"
+      failed:
+        - report
+        - move: "crew:code-merging:failed"
+  skip:
+    queue: default
+    labels:
+      ready: "crew:skip:ready"
+      running: "crew:skip:running"
+    routes:
+      passed: "crew:skip"
+
+board:
+  0. waiting brainstorm: [crew:brainstorm:ready]
+  1. brainstorming:
+    - crew:brainstorm:in progress
+    - crew:brainstorm:done
+    - crew:brainstorm:promoting
+  2. splitting:
+    - crew:splitting:ready
+    - crew:splitting:in progress
+  3. planning:
+    - crew:planning:ready
+    - crew:planning:in progress
+  4. relationship:
+    - crew:relationship:ready
+    - crew:relationship:in progress
+  5. ready:
+    - crew:development:ready
+  6. development:
+    - crew:development:in progress
+  7. waiting review:
+    - crew:code-review:ready
+    - crew:development:waiting review
+  8. code review:
+    - crew:code-review:in progress
+    - crew:code-review:done
+    - crew:code-review:promoting
+  9. merging:
+    - crew:code-merging:ready
+    - crew:code-merging:in progress
+    - crew:code-merging:done
+    - crew:code-merging:promoting
+  10. skipped:
+    - crew:skip:ready
+    - crew:skip:running
+    - crew:skip
+  11. failed:
+    - crew:splitting:failed
+    - crew:planning:failed
+    - crew:relationship:failed
+    - crew:development:failed
+    - crew:fix:failed
+    - crew:code-review:failed
+    - crew:code-merging:failed
