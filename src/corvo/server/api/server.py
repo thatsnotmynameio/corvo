@@ -31,7 +31,7 @@ async def corvo_error_handler(request: Request, exc: Exception) -> JSONResponse:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The connection pool lives as long as the app.
-    engine = create_engine(str(get_settings().database_url))
+    engine = create_engine(get_settings().get_postgres_dsn())
     app.state.sessionmaker = create_sessionmaker(engine)
     yield
     await engine.dispose()
