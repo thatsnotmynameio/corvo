@@ -32,7 +32,8 @@ async def test_hello_runs_on_the_worker(hatchet: Hatchet) -> None:
         name="hello", input_validator=HelloInput, output_validator=HelloOutput
     )
 
-    output = await hello.aio_run(HelloInput(name="corvo"))
+    async with asyncio.timeout(30):
+        output = await hello.aio_run(HelloInput(name="corvo"))
 
     assert output == HelloOutput(message="Hello, corvo!")
 
@@ -55,10 +56,10 @@ async def test_greeting_shouts_hellos_greeting(hatchet: Hatchet) -> None:
 async def test_greeting_hands_a_failure_to_its_handler(hatchet: Hatchet) -> None:
     greeting = hatchet.stubs.workflow(name="greeting", input_validator=GreetingInput)
 
-    run = await greeting.aio_run(
-        GreetingInput(name="corvo", force_failure=True), wait_for_result=False
-    )
     async with asyncio.timeout(30):
+        run = await greeting.aio_run(
+            GreetingInput(name="corvo", force_failure=True), wait_for_result=False
+        )
         with pytest.raises(Exception, match="shout was asked to fail"):
             await run.aio_result()
         tasks = await finished_tasks(hatchet, run.workflow_run_id, count=3)
