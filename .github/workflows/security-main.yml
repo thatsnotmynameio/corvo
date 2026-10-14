@@ -32,7 +32,7 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-grype-${{ github.sha }}
       cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/grype.yml@4339553065e0e0653a3a524a343d79dd816f09a0 # main
 
   # zizmor's audit of the workflows, through the organization's workflow
   # (thatsnotmynameio/github-actions' zizmor.yml) under the category "zizmor".
@@ -46,4 +46,4 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-zizmor-${{ github.sha }}
       cancel-in-progress: false
-    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/zizmor.yml@4339553065e0e0653a3a524a343d79dd816f09a0 # main
