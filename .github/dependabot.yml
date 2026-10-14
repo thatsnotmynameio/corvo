@@ -1,0 +1,17 @@
+# Weekly pull requests for new versions of the actions, pinned by SHA. A
+# version is proposed only once it is 7 days old, so a compromised release has
+# time to be pulled. The Python dependencies join (package-ecosystem "uv") once
+# the repository has pyproject.toml and uv.lock.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]

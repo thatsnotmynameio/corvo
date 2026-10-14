@@ -1,0 +1,33 @@
+# Each push to main: the Python project's checks, through the organization's
+# workflow (thatsnotmynameio/github-actions' python.yml). On Linux and macOS it
+# checks that uv.lock is current, then runs ruff's formatting and lint and the
+# tests with coverage; Linux also checks the coverage floor of
+# .github/python.yml and uploads ruff's findings to code scanning. The build of
+# the package and image follows. The push gives code scanning the analysis of
+# main that a pull request's ruff alerts are compared against. Without
+# pyproject.toml there is nothing to check.
+# On a pull request the organization's ruleset runs the same workflow, as the
+# check "tnmn.io: python", with .github/python.yml and ruff.toml from the base
+# commit: a change to them applies once it merges. actionlint runs on every
+# pull request the same way, as the check "tnmn.io: actionlint".
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+# Each commit gets a group of its own and is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  python:
+    name: python
+    permissions:
+      contents: read
+      security-events: write # uploads ruff's findings to code scanning
+    uses: thatsnotmynameio/github-actions/.github/workflows/python.yml@aa829fcc2995ede437b13fe185cdafec1de7287b # main
