@@ -18,7 +18,10 @@ EXECUTION_TIMEOUT = timedelta(minutes=10)
 
 # For a non-durable step that waits on a child run, which declares retries=0
 # with this timeout: retrying it would spawn a second child while the first
-# may still run. It covers one child declared with the defaults, every attempt
-# of it plus Hatchet's 5-minute scheduling timeout. A durable task keeps
-# RETRIES, since its retry replays from checkpoints and spawns nothing twice.
-WAITING_EXECUTION_TIMEOUT = timedelta(minutes=45)
+# may still run. It covers one child declared with the defaults: each of its
+# attempts may queue up to Hatchet's 5-minute scheduling timeout, which the
+# engine sets again on every retry, then run for EXECUTION_TIMEOUT, so
+# 4 x 15 minutes, plus a margin for the engine noticing each timeout. A
+# durable task keeps RETRIES, since its retry replays from checkpoints and
+# spawns nothing twice.
+WAITING_EXECUTION_TIMEOUT = timedelta(minutes=65)
