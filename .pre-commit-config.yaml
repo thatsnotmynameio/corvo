@@ -1,0 +1,71 @@
+# The checks each commit runs locally, through prek (a dev dependency):
+# `uv run prek install` once per clone puts them in the git hooks, which every
+# worktree shares, and `uv run prek run --all-files` runs them over the whole
+# repository. They catch locally what the organization's checks fail a pull
+# request on; those checks, with their own versions of ruff, zizmor and
+# actionlint, are what counts.
+# The Python tools come from uv.lock, run with --frozen so that a hook never
+# rewrites the lock: the uv lock hook is the one that checks it. The other
+# repositories are pinned by SHA, and Dependabot updates them with the
+# `# frozen:` comment.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c # frozen: v6.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ["--maxkb=750"]
+        exclude: ^uv\.lock$
+      - id: check-toml
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      # The organization's check runs `uv lock --check` as well.
+      - id: uv-lock
+        name: uv lock
+        entry: uv lock --check
+        language: unsupported
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+
+      # Before the formatter: a fix can leave code it then formats.
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --frozen ruff check --force-exclude --fix --exit-non-zero-on-fix
+        language: unsupported
+        types_or: [python, pyi]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen ruff format --force-exclude --exit-non-zero-on-format
+        language: unsupported
+        types_or: [python, pyi]
+        require_serial: true
+
+      # Over the files of mypy.ini, not only the changed ones: a change in one
+      # module can break the types of another.
+      - id: mypy
+        name: mypy
+        entry: uv run --frozen mypy
+        language: unsupported
+        files: (\.pyi?|^mypy\.ini)$
+        pass_filenames: false
+        require_serial: true
+
+      # Without a GitHub token zizmor runs only its offline audits.
+      - id: zizmor
+        name: zizmor
+        entry: uv run --frozen zizmor .
+        language: unsupported
+        files: ^\.github/(workflows/|dependabot\.ya?ml$)
+        pass_filenames: false
+        require_serial: true
+
+  # Built from source with Go, which prek installs when it is missing.
+  - repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca # frozen: v1.7.12
+    hooks:
+      - id: actionlint

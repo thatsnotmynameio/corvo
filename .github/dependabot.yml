@@ -1,7 +1,7 @@
 # Weekly pull requests for new versions of the actions, pinned by SHA, of the
-# Python dependencies in uv.lock, and of the images of the Dockerfile and the
-# compose files. A version is proposed only once it is 7 days old, so a
-# compromised release has time to be pulled.
+# Python dependencies in uv.lock, of the hooks of .pre-commit-config.yaml, and
+# of the images of the Dockerfile and the compose files. A version is proposed
+# only once it is 7 days old, so a compromised release has time to be pulled.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -26,6 +26,20 @@ updates:
       prefix: "deps"
     groups:
       python:
+        patterns: ["*"]
+
+  # The repositories of .pre-commit-config.yaml, pinned by SHA with a
+  # `# frozen:` comment that Dependabot keeps in step.
+  - package-ecosystem: "pre-commit"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci"
+    groups:
+      pre-commit:
         patterns: ["*"]
 
   # The Dockerfile's python and uv images.
