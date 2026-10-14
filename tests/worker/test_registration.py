@@ -17,11 +17,12 @@ from types import ModuleType
 from typing import Any
 
 import pytest
-from hatchet_sdk import Context, EmptyModel
+from hatchet_sdk import ClientConfig, Context, EmptyModel, Hatchet
 from hatchet_sdk.runnables.workflow import BaseWorkflow
 
 import corvo.worker.tasks
 import corvo.worker.workflows
+from corvo.settings import get_settings
 from corvo.worker.hatchet_client import hatchet
 from corvo.worker.worker import WORKFLOWS
 
@@ -76,10 +77,11 @@ def problems(
         return labels.get(id(workflow), workflow.name)
 
     listed = Counter(id(workflow) for workflow in registered)
-    # Hatchet compares names lowercased, and the last one registered wins.
+    # Hatchet keys a worker's actions on service_name, the name lowercased
+    # with the namespace applied, and the last one registered wins.
     sharing: defaultdict[str, list[str]] = defaultdict(list)
     for workflow in every.values():
-        sharing[workflow.name.lower()].append(label(workflow))
+        sharing[workflow.service_name].append(label(workflow))
 
     return [
         *(
@@ -130,6 +132,19 @@ dag = hatchet.workflow(name="registration-dag")
 async def step(input: EmptyModel, ctx: Context) -> None: ...
 
 
+namespaced = Hatchet(
+    config=ClientConfig(token=get_settings().hatchet_token, namespace="foo")
+)
+
+
+@namespaced.task(name="job")
+async def namespaced_job(input: EmptyModel, ctx: Context) -> None: ...
+
+
+@namespaced.task(name="foo_job")
+async def prefixed_job(input: EmptyModel, ctx: Context) -> None: ...
+
+
 def test_every_definition_in_the_areas_is_registered() -> None:
     roots = [Path(path) for area in AREAS for path in area.__path__]
 
@@ -167,6 +182,20 @@ def test_names_differing_only_in_case_are_shared() -> None:
     found = problems(defined, [first_dup, capital_dup])
 
     assert found == ["area.first.dup and area.second.dup share the name 'dup'"]
+
+
+def test_names_sharing_a_namespaced_name_are_shared() -> None:
+    # The namespace is prefixed only to a name that does not start with it.
+    defined = definitions(
+        [
+            module("area.first", job=namespaced_job),
+            module("area.second", job=prefixed_job),
+        ]
+    )
+
+    found = problems(defined, [namespaced_job, prefixed_job])
+
+    assert found == ["area.first.job and area.second.job share the name 'foo_job'"]
 
 
 def test_a_definition_listed_twice_is_named() -> None:
