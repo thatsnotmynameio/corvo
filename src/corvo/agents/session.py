@@ -9,7 +9,7 @@ success, and its structured_output validates. Anything else raises
 AgentRunFailed, carrying what the session reported: the turn or budget
 limit (an error result, then ResultError), an API failure (a success result
 with is_error, then ResultError), a result with no structured output, or a
-CLI that exits without a result (ProcessError).
+CLI that fails with no error result (ProcessError), even after a success.
 """
 
 import sys
@@ -37,27 +37,36 @@ async def consume[T: BaseModel](
                 result = message
     except ProcessError as error:
         # ResultError follows an error result, which the checks below read.
+        # Any other exit fails the run, even after a success result.
         if result is None or not result.is_error:
             raise AgentRunFailed(
-                "process_failed", RunReport(session_id=session_id)
+                "process_failed", report(result, session_id)
             ) from error
 
     if result is None:
-        raise AgentRunFailed("no_result", RunReport(session_id=session_id))
-    report = RunReport(
+        raise AgentRunFailed("no_result", report(result, session_id))
+    run_report = report(result, session_id)
+    if result.subtype != "success":
+        raise AgentRunFailed(result.subtype, run_report)
+    if result.is_error:
+        raise AgentRunFailed("api_error", run_report)
+    if result.structured_output is None:
+        raise AgentRunFailed("no_structured_output", run_report)
+    try:
+        output = schema.model_validate(result.structured_output)
+    except ValidationError as error:
+        raise AgentRunFailed("invalid_structured_output", run_report) from error
+    return output, run_report
+
+
+def report(result: ResultMessage | None, session_id: str | None) -> RunReport:
+    """What the session reported: its result's, or only the session ID the
+    init message gave when no result arrived."""
+    if result is None:
+        return RunReport(session_id=session_id)
+    return RunReport(
         subtype=result.subtype,
         num_turns=result.num_turns,
         total_cost_usd=result.total_cost_usd,
         session_id=result.session_id,
     )
-    if result.subtype != "success":
-        raise AgentRunFailed(result.subtype, report)
-    if result.is_error:
-        raise AgentRunFailed("api_error", report)
-    if result.structured_output is None:
-        raise AgentRunFailed("no_structured_output", report)
-    try:
-        output = schema.model_validate(result.structured_output)
-    except ValidationError as error:
-        raise AgentRunFailed("invalid_structured_output", report) from error
-    return output, report

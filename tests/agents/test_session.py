@@ -101,6 +101,20 @@ async def test_a_process_that_fails_without_a_result_keeps_the_session_id() -> N
     assert failure.value.report == RunReport(session_id=SESSION_ID)
 
 
+async def test_a_process_that_fails_after_a_success_keeps_its_report() -> None:
+    session = ScriptedQuery(
+        init(),
+        result(structured_output={"tone": "friendly"}),
+        error=ProcessError("crashed", exit_code=137),
+    )
+
+    with pytest.raises(AgentRunFailed) as failure:
+        await consume(session.stream(), Verdict)
+
+    assert failure.value.reason == "process_failed"
+    assert failure.value.report == report("success")
+
+
 async def test_a_session_that_ends_without_a_result_fails() -> None:
     session = ScriptedQuery(init())
 
