@@ -32,6 +32,7 @@ AF_INET = 2
 AF_NETLINK = 16
 NETLINK_ROUTE = 0
 NETLINK_NETFILTER = 12
+HIGH_BIT = 1 << 32
 IPPROTO_TCP = 6
 
 REFUSED = [
@@ -123,14 +124,26 @@ def test_a_change_in_the_vendored_allow_list_changes_the_profile(
     assert seccomp.generate(changed) != profile
 
 
-def test_a_moved_socket_rule_fails_the_generation() -> None:
+def test_moved_architectures_fail_the_generation() -> None:
     changed = upstream()
-    for rule in changed["syscalls"]:
-        if rule.get("args") == [{"index": 0, "value": 38, "op": "SCMP_CMP_LT"}]:
-            rule["args"][0]["value"] = 39
+    for entry in changed["archMap"]:
+        if entry["architecture"] == "SCMP_ARCH_X86_64":
+            entry["subArchitectures"].remove("SCMP_ARCH_X86")
 
-    with pytest.raises(ValueError, match="socket rule"):
+    with pytest.raises(ValueError, match="x86-64 architectures"):
         seccomp.generate(changed)
+
+
+def test_32_bit_x86_is_not_an_architecture_of_the_profile(
+    profile: dict[str, Any],
+) -> None:
+    (x86_64,) = [
+        entry
+        for entry in profile["archMap"]
+        if entry["architecture"] == "SCMP_ARCH_X86_64"
+    ]
+
+    assert x86_64["subArchitectures"] == ["SCMP_ARCH_X32"]
 
 
 @pytest.mark.parametrize("name", seccomp.BUBBLEWRAP_CALLS)
@@ -148,7 +161,22 @@ def test_netfilter_sockets_are_refused(profile: dict[str, Any]) -> None:
     assert allowed(upstream(), "socket", a0=AF_NETLINK, a2=NETLINK_NETFILTER)
 
     assert not allowed(profile, "socket", a0=AF_NETLINK, a2=NETLINK_NETFILTER)
-    assert not allowed(profile, "socketcall")
+
+
+@pytest.mark.parametrize(
+    ("family", "protocol"),
+    [
+        (AF_NETLINK, HIGH_BIT | NETLINK_NETFILTER),
+        (HIGH_BIT | AF_NETLINK, NETLINK_NETFILTER),
+        (HIGH_BIT | AF_NETLINK, HIGH_BIT | NETLINK_NETFILTER),
+    ],
+)
+def test_high_bits_do_not_reopen_netfilter_sockets(
+    profile: dict[str, Any], family: int, protocol: int
+) -> None:
+    # The kernel reads both arguments as 32-bit ints, so these are netfilter
+    # sockets too.
+    assert not allowed(profile, "socket", a0=family, a2=protocol)
 
 
 def test_other_sockets_stay_allowed(profile: dict[str, Any]) -> None:

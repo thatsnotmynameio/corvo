@@ -28,6 +28,7 @@ def main() -> None:
             {
                 "uid": os.getuid(),
                 "cwd": os.getcwd(),
+                "cwd writable": os.access(".", os.W_OK),
                 "processes": {
                     path.name: (path / "cmdline").read_bytes().split(b"\0")[0].decode()
                     for path in pids

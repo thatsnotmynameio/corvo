@@ -28,43 +28,40 @@ PROFILE = HERE / "seccomp.json"
 BUBBLEWRAP_CALLS = ["clone", "unshare", "mount", "umount2", "pivot_root", "setns"]
 
 AF_NETLINK = 16
-AF_ALG = 38
 NETLINK_NETFILTER = 12
+LOW_32_BITS = 0xFFFFFFFF
 
-# Docker's rule for the address families below AF_ALG, AF_NETLINK among them.
-UPSTREAM_SOCKET_RULE = {
+# With user namespaces allowed, nf_tables is open to every command, and it is
+# the kernel area most unprivileged-namespace exploits have used, such as
+# CVE-2024-1086; bubblewrap needs only NETLINK_ROUTE. The kernel reads
+# socket()'s family and protocol as 32-bit ints, so the rule compares their
+# low 32 bits alone: a value with high bits set is still a netfilter socket to
+# the kernel. libseccomp refuses a rule whose action is the profile's default,
+# EPERM, so it answers EPROTONOSUPPORT, as a kernel without netfilter does.
+NETFILTER_SOCKET_RULE = {
     "names": ["socket"],
-    "action": "SCMP_ACT_ALLOW",
-    "args": [{"index": 0, "value": AF_ALG, "op": "SCMP_CMP_LT"}],
+    "action": "SCMP_ACT_ERRNO",
+    "errnoRet": 93,
+    "args": [
+        {
+            "index": 0,
+            "value": LOW_32_BITS,
+            "valueTwo": AF_NETLINK,
+            "op": "SCMP_CMP_MASKED_EQ",
+        },
+        {
+            "index": 2,
+            "value": LOW_32_BITS,
+            "valueTwo": NETLINK_NETFILTER,
+            "op": "SCMP_CMP_MASKED_EQ",
+        },
+    ],
 }
 
-# It becomes two: the families below AF_NETLINK with any protocol, and the
-# families below AF_ALG with any protocol but 12. With user namespaces
-# allowed, nf_tables is open to every command, and it is the kernel area most
-# unprivileged-namespace exploits have used, such as CVE-2024-1086; bubblewrap
-# needs only NETLINK_ROUTE. The families from AF_PACKET to AF_ALG lose
-# protocol 12 too, which none of them uses: a rule cannot hold two conditions
-# on the same argument.
-SOCKET_RULES = [
-    {
-        "names": ["socket"],
-        "action": "SCMP_ACT_ALLOW",
-        "args": [{"index": 0, "value": AF_NETLINK, "op": "SCMP_CMP_LT"}],
-    },
-    {
-        "names": ["socket"],
-        "action": "SCMP_ACT_ALLOW",
-        "args": [
-            {"index": 0, "value": AF_ALG, "op": "SCMP_CMP_LT"},
-            {"index": 2, "value": NETLINK_NETFILTER, "op": "SCMP_CMP_NE"},
-        ],
-    },
-]
-
-# socketcall multiplexes every socket call of 32-bit x86, with its arguments
-# in memory where a filter cannot read them: a 32-bit binary would open a
-# netfilter socket through it.
-MULTIPLEXED_SOCKET_CALL = "socketcall"
+# 32-bit x86 reaches socket() through socketcall, with its arguments in memory
+# where no filter reads them. Without x86 among x86-64's sub-architectures,
+# every 32-bit call ends in the filter's bad-architecture action.
+DROPPED_SUBARCHITECTURE = "SCMP_ARCH_X86"
 
 
 def generate(upstream: dict[str, Any]) -> dict[str, Any]:
@@ -78,15 +75,18 @@ def generate(upstream: dict[str, Any]) -> dict[str, Any]:
     if len(unconditional) != 1 or unconditional[0]["action"] != "SCMP_ACT_ALLOW":
         raise ValueError("the vendored profile has no single unconditional allow")
     allowed: list[str] = unconditional[0]["names"]
-    if MULTIPLEXED_SOCKET_CALL not in allowed:
-        raise ValueError("the vendored profile no longer allows socketcall")
-    allowed.remove(MULTIPLEXED_SOCKET_CALL)
     allowed += [name for name in BUBBLEWRAP_CALLS if name not in allowed]
 
-    if UPSTREAM_SOCKET_RULE not in rules:
-        raise ValueError("the vendored profile's socket rule has changed")
-    at = rules.index(UPSTREAM_SOCKET_RULE)
-    rules[at : at + 1] = copy.deepcopy(SOCKET_RULES)
+    x86_64 = [
+        entry
+        for entry in profile["archMap"]
+        if entry["architecture"] == "SCMP_ARCH_X86_64"
+    ]
+    if len(x86_64) != 1 or DROPPED_SUBARCHITECTURE not in x86_64[0]["subArchitectures"]:
+        raise ValueError("the vendored profile's x86-64 architectures have changed")
+    x86_64[0]["subArchitectures"].remove(DROPPED_SUBARCHITECTURE)
+
+    rules.append(copy.deepcopy(NETFILTER_SOCKET_RULE))
     return profile
 
 

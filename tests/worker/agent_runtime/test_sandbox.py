@@ -22,8 +22,16 @@ SANDBOX = {
 
 
 def settings_argv(**overrides: Any) -> list[str]:
+    """The engine's arguments as the SDK passes them for setting_sources=[]
+    and the session's sandbox, with overrides to the sandbox."""
     settings = {"sandbox": {**SANDBOX, **overrides}}
-    return ["--output-format", "stream-json", "--settings", json.dumps(settings)]
+    return [
+        "--output-format",
+        "stream-json",
+        "--setting-sources=",
+        "--settings",
+        json.dumps(settings),
+    ]
 
 
 def run_env(cgroup: Path, workdir: str = "", writes: str = "0") -> dict[str, str]:
@@ -118,7 +126,7 @@ def test_the_engine_runs_in_a_fresh_sandbox(
     ]
     assert started.argv[1:7] == flags
     assert not any(arg.startswith("/sys") for arg in started.argv)
-    assert started.argv[-5:] == [ENGINE, *settings_argv()]
+    assert started.argv[-6:] == [ENGINE, *settings_argv()]
 
 
 def test_bubblewrap_starts_with_an_empty_environment(
@@ -263,6 +271,77 @@ def test_a_call_without_its_runs_values_is_refused(
     refused(monkeypatch, env, settings_argv())
 
 
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("CORVO_SANDBOX_WRITES", "2"),
+        ("CORVO_SANDBOX_CGROUP", "cgroups/run-1"),
+        ("CORVO_SANDBOX_CGROUP", ""),
+        ("CORVO_SANDBOX_ENGINE", "engine/claude"),
+        ("CORVO_SANDBOX_ENGINE", ""),
+        ("CORVO_SANDBOX_WORKDIR", "workdirs/run-1"),
+        ("CORVO_SANDBOX_TMPFS", "0"),
+        ("CORVO_SANDBOX_TMPFS", "-1"),
+        ("CORVO_SANDBOX_TMPFS", "100M"),
+    ],
+)
+def test_a_call_with_an_invalid_value_is_refused(
+    monkeypatch: pytest.MonkeyPatch, cgroup: Path, name: str, value: str
+) -> None:
+    refused(monkeypatch, run_env(cgroup) | {name: value}, settings_argv())
+
+
+def test_writes_without_a_working_directory_are_refused(
+    monkeypatch: pytest.MonkeyPatch, cgroup: Path
+) -> None:
+    refused(monkeypatch, run_env(cgroup, "", "1"), settings_argv())
+
+
+@pytest.mark.parametrize(
+    "workdir",
+    [
+        "/",
+        "/proc",
+        "/proc/1",
+        "/dev/shm",
+        "/usr/share",
+        "/etc",
+        "/lib/x86_64-linux-gnu",
+        "/opt",
+        "/opt/corvo/engine",
+        "//proc",
+        "/./proc",
+    ],
+)
+def test_a_working_directory_over_the_sandboxs_own_mounts_is_refused(
+    monkeypatch: pytest.MonkeyPatch, cgroup: Path, workdir: str
+) -> None:
+    # Bound over /proc it would show the worker's processes and environment,
+    # and bound over / or /opt every host path.
+    refused(monkeypatch, run_env(cgroup, workdir), settings_argv())
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        [],
+        ["--setting-sources=project"],
+        ["--setting-sources=user,project,local"],
+        ["--setting-sources", ""],
+        ["--setting-sources=", "--setting-sources=project"],
+    ],
+    ids=["absent", "project", "every source", "separate value", "two"],
+)
+def test_a_session_that_loads_settings_from_disk_is_refused(
+    monkeypatch: pytest.MonkeyPatch, cgroup: Path, sources: list[str]
+) -> None:
+    # The working directory's .claude settings could add hooks or exclude
+    # commands from the sandbox.
+    argv = [arg for arg in settings_argv() if arg != "--setting-sources="]
+
+    refused(monkeypatch, run_env(cgroup), [*sources, *argv])
+
+
 def test_a_cgroup_it_cannot_join_is_refused(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -277,11 +356,16 @@ def test_a_cgroup_it_cannot_join_is_refused(
         settings_argv(enabled=False),
         settings_argv(excludedCommands=["git"]),
         settings_argv(enableWeakerNestedSandbox=True),
-        ["--settings", json.dumps({"sandbox": {"enabled": True}})],
-        ["--settings", json.dumps({"permissions": {}})],
-        ["--settings", "/home/agent/settings.json"],
-        ["--output-format", "stream-json"],
-        [*settings_argv(), *settings_argv(failIfUnavailable=False)],
+        [
+            "--setting-sources=",
+            "--settings",
+            json.dumps({"sandbox": {"enabled": True}}),
+        ],
+        ["--setting-sources=", "--settings", json.dumps({"permissions": {}})],
+        ["--setting-sources=", "--settings", "/home/agent/settings.json"],
+        ["--setting-sources=", "--output-format", "stream-json"],
+        [*settings_argv(), "--settings", settings_argv()[-1]],
+        [*settings_argv(), '--settings={"sandbox": {"enabled": false}}'],
     ],
     ids=[
         "fail-if-unavailable off",
@@ -294,6 +378,7 @@ def test_a_cgroup_it_cannot_join_is_refused(
         "a settings file",
         "no settings",
         "two settings",
+        "inline settings",
     ],
 )
 def test_a_session_without_the_sdks_sandbox_is_refused(

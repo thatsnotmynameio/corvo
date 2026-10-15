@@ -5,7 +5,6 @@
 		{
 			"architecture": "SCMP_ARCH_X86_64",
 			"subArchitectures": [
-				"SCMP_ARCH_X86",
 				"SCMP_ARCH_X32"
 			]
 		},
@@ -371,6 +370,7 @@
 				"signalfd4",
 				"sigprocmask",
 				"sigreturn",
+				"socketcall",
 				"socketpair",
 				"splice",
 				"stat",
@@ -449,26 +449,8 @@
 			"args": [
 				{
 					"index": 0,
-					"value": 16,
-					"op": "SCMP_CMP_LT"
-				}
-			]
-		},
-		{
-			"names": [
-				"socket"
-			],
-			"action": "SCMP_ACT_ALLOW",
-			"args": [
-				{
-					"index": 0,
 					"value": 38,
 					"op": "SCMP_CMP_LT"
-				},
-				{
-					"index": 2,
-					"value": 12,
-					"op": "SCMP_CMP_NE"
 				}
 			]
 		},
@@ -893,6 +875,27 @@
 					"CAP_PERFMON"
 				]
 			}
+		},
+		{
+			"names": [
+				"socket"
+			],
+			"action": "SCMP_ACT_ERRNO",
+			"errnoRet": 93,
+			"args": [
+				{
+					"index": 0,
+					"value": 4294967295,
+					"valueTwo": 16,
+					"op": "SCMP_CMP_MASKED_EQ"
+				},
+				{
+					"index": 2,
+					"value": 4294967295,
+					"valueTwo": 12,
+					"op": "SCMP_CMP_MASKED_EQ"
+				}
+			]
 		}
 	]
 }

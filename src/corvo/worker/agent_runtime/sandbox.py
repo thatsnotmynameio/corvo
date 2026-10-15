@@ -57,6 +57,12 @@ ROOT_SYMLINKS = (
     ("usr/lib64", "/lib64"),
 )
 
+# The system paths the sandbox mounts itself. A working directory bound over
+# one, or inside one, would replace what the engine sees there: over /proc it
+# shows the worker's processes and their environments. /tmp and the home are
+# the sandbox's own tmpfs, so a working directory inside them hides nothing.
+SYSTEM_PATHS = ("/usr", "/etc", "/proc", "/dev", *(link for _, link in ROOT_SYMLINKS))
+
 
 class Refused(Exception):
     """The wrapper will not start the engine."""
@@ -96,12 +102,42 @@ def read_run(env: Mapping[str, str]) -> Run:
         raise Refused("an empty cgroup or engine")
     if not tmpfs.isdigit() or int(tmpfs) == 0:
         raise Refused("CORVO_SANDBOX_TMPFS is not a size in bytes")
+    if workdir:
+        workdir = normalized(workdir)
+        check_workdir(workdir, os.path.dirname(engine))
     return Run(cgroup, workdir, writes == "1", engine, int(tmpfs))
 
 
+def normalized(path: str) -> str:
+    """The absolute path without empty or "." components, which os.path
+    keeps for a leading "//"."""
+    return "/" + "/".join(part for part in path.split("/") if part not in ("", "."))
+
+
+def within(path: str, parent: str) -> bool:
+    return path == parent or path.startswith(parent.rstrip("/") + "/")
+
+
+def check_workdir(workdir: str, engine_dir: str) -> None:
+    """Refuses a working directory bound over a path the sandbox mounts, or
+    over one of their parents, such as / itself."""
+    shadowed = (*SYSTEM_PATHS, engine_dir)
+    if any(within(workdir, path) for path in shadowed):
+        raise Refused(f"the working directory lies in {workdir.split('/')[1]!r}")
+    if any(within(path, workdir) for path in (*shadowed, "/tmp", HOME)):
+        raise Refused("the working directory holds a path the sandbox mounts")
+
+
 def check_settings(argv: Sequence[str]) -> None:
-    """Refuses unless the one --settings the SDK passes runs every command in
-    the SDK's sandbox, and none outside it."""
+    """Refuses unless the session loads no settings from disk, and the one
+    --settings the SDK passes runs every command in the SDK's sandbox, and
+    none outside it."""
+    # The SDK passes setting_sources=[] as one empty --setting-sources=, and
+    # nothing at all for its default, which loads the working directory's
+    # .claude settings: their hooks and excluded commands run unsandboxed.
+    sources = [arg for arg in argv if arg.startswith("--setting-sources")]
+    if sources != ["--setting-sources="]:
+        raise Refused("the session loads settings from disk")
     if any(arg.startswith("--settings=") for arg in argv):
         raise Refused("--settings given inline")
     at = [index for index, arg in enumerate(argv) if arg == "--settings"]

@@ -8,6 +8,7 @@ cgroup. test_isolation_gate.py asserts on the report.
 """
 
 import asyncio
+import ctypes
 import errno
 import json
 import os
@@ -54,6 +55,28 @@ SANDBOX = cast(
 # command sees, which only the SDK's own sandbox narrows to loopback.
 COMMAND = "echo corvo-gate $(tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ')"
 
+SYS_SOCKET_X86_64 = 41
+SOCK_RAW = 3
+NETLINK_NETFILTER = 12
+
+# socketcall(SYS_SOCKET, [AF_NETLINK, SOCK_RAW, NETLINK_NETFILTER]) through
+# int 0x80, the 32-bit x86 entry, from code and arguments mapped below 4 GiB.
+# It prints the fd or the errno; the filter may also kill it.
+SOCKETCALL = """
+import ctypes, errno, mmap, struct
+page = mmap.mmap(-1, 4096, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | 0x40,
+                 prot=mmap.PROT_READ | mmap.PROT_WRITE | mmap.PROT_EXEC)
+base = ctypes.addressof(ctypes.c_char.from_buffer(page))
+assert base < 2**32
+arguments = base + 64
+code = (b"\\x53" + b"\\xb8" + struct.pack("<I", 102) + b"\\xbb" + struct.pack("<I", 1)
+        + b"\\xb9" + struct.pack("<I", arguments) + b"\\xcd\\x80" + b"\\x5b\\xc3")
+page[0:len(code)] = code
+page[64:76] = struct.pack("<3I", 16, 3, 12)
+result = ctypes.CFUNCTYPE(ctypes.c_int)(base)()
+print("opened" if result >= 0 else errno.errorcode.get(-result, str(-result)))
+"""
+
 HOG = """
 import os, sys, time
 with open(os.path.join(sys.argv[1], "cgroup.procs"), "w") as procs:
@@ -85,8 +108,22 @@ def environment() -> dict[str, Any]:
         if " /sys/fs/cgroup " in line
     )
     version = subprocess.run(["bwrap", "--version"], capture_output=True, text=True)
+    status = dict(
+        line.split(":\t", 1)
+        for line in Path("/proc/self/status").read_text().splitlines()
+    )
+    setuid = subprocess.run(
+        ["find", "/", "-xdev", "-type", "f", "-perm", "/6000"],
+        capture_output=True,
+        text=True,
+    )
     return {
         "uid": os.getuid(),
+        "privileges": {
+            name: status[name].strip()
+            for name in ("NoNewPrivs", "CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb")
+        },
+        "setuid files": setuid.stdout.split(),
         "kernel": os.uname().release,
         "bubblewrap": version.stdout.strip(),
         "cgroup": Path("/proc/self/cgroup").read_text().strip(),
@@ -94,15 +131,47 @@ def environment() -> dict[str, Any]:
     }
 
 
+def raw_socket(family: int, protocol: int) -> str:
+    """socket() as a raw syscall, so its 64-bit arguments reach the filter as
+    given: a command can set bits the kernel's 32-bit ints then drop."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.syscall.restype = ctypes.c_long
+    args = (ctypes.c_long(family), ctypes.c_long(SOCK_RAW), ctypes.c_long(protocol))
+    fd = libc.syscall(SYS_SOCKET_X86_64, *args)
+    if fd >= 0:
+        os.close(fd)
+        return "opened"
+    return errno.errorcode.get(ctypes.get_errno(), str(ctypes.get_errno()))
+
+
+def socketcall() -> str:
+    """A netfilter socket through 32-bit x86's socketcall, in a process of its
+    own, since the filter may kill it."""
+    ran = subprocess.run(
+        [sys.executable, "-c", SOCKETCALL], capture_output=True, text=True, timeout=30
+    )
+    if ran.returncode < 0:
+        return f"killed by signal {-ran.returncode}"
+    return ran.stdout.strip() or f"exit {ran.returncode}: {ran.stderr[-300:]}"
+
+
 def netlink() -> dict[str, str]:
-    """Whether the container's seccomp profile lets each netlink family open."""
+    """Whether the container's seccomp profile lets each netlink socket open."""
     results = {}
-    for name, protocol in (("route", 0), ("netfilter", 12)):
+    for name, protocol in (("route", 0), ("netfilter", NETLINK_NETFILTER)):
         try:
             socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, protocol).close()
             results[name] = "opened"
         except OSError as error:
             results[name] = errno.errorcode.get(error.errno or 0, str(error.errno))
+    high = 1 << 32
+    results["netfilter, protocol's high bits"] = raw_socket(
+        socket.AF_NETLINK, high | NETLINK_NETFILTER
+    )
+    results["netfilter, family's high bits"] = raw_socket(
+        high | socket.AF_NETLINK, NETLINK_NETFILTER
+    )
+    results["netfilter, 32-bit socketcall"] = socketcall()
     return results
 
 
@@ -146,19 +215,32 @@ def run_env(cgroup: Path, engine: str) -> dict[str, str]:
     }
 
 
+def pids_peak(cgroup: Path) -> int:
+    """How many processes the cgroup ever held: none unless the wrapper
+    joined it."""
+    return int((cgroup / "pids.peak").read_text())
+
+
 def probe() -> Any:
+    """The probe in the engine's place, in a read-only working directory of
+    its own, as a run with one gets."""
     cgroup = run_cgroup("run-gate-probe", 256 * MIB, 64)
+    workdir = tempfile.mkdtemp(prefix="corvo-gate-", dir="/var/tmp")
     settings = json.dumps({"sandbox": SANDBOX})
     ran = subprocess.run(
-        [WRAPPER, "--settings", settings],
-        env={**os.environ, **run_env(cgroup, str(HERE / "probe.py"))},
+        [WRAPPER, "--setting-sources=", "--settings", settings],
+        env={
+            **os.environ,
+            **run_env(cgroup, str(HERE / "probe.py")),
+            "CORVO_SANDBOX_WORKDIR": workdir,
+        },
         capture_output=True,
         text=True,
         timeout=60,
     )
     if ran.returncode != 0:
         return {"returncode": ran.returncode, "stderr": ran.stderr[-2000:]}
-    return json.loads(ran.stdout)
+    return json.loads(ran.stdout) | {"workdir": workdir, "pids.peak": pids_peak(cgroup)}
 
 
 async def listening(port: int) -> None:
@@ -198,6 +280,7 @@ async def session(directory: Path) -> dict[str, Any]:
         ]
     )
     stderr: list[str] = []
+    cgroup = run_cgroup("run-gate-session", 1024 * MIB, 256)
     options = ClaudeAgentOptions(
         cli_path=WRAPPER,
         tools=["Bash"],
@@ -209,7 +292,7 @@ async def session(directory: Path) -> dict[str, Any]:
         model="claude-haiku-5-5",
         max_turns=3,
         env={
-            **run_env(run_cgroup("run-gate-session", 1024 * MIB, 256), ENGINE),
+            **run_env(cgroup, ENGINE),
             "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
         },
         sandbox=SANDBOX,
@@ -235,6 +318,7 @@ async def session(directory: Path) -> dict[str, Any]:
     report["seconds"] = round(time.monotonic() - started, 2)
     report["stderr"] = stderr[-20:]
     report["requests"] = [json.loads(line) for line in log.read_text().splitlines()]
+    report["pids.peak"] = pids_peak(cgroup)
     return report
 
 

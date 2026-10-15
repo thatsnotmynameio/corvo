@@ -164,8 +164,30 @@ def test_the_cgroup_mount_delegates_by_namespace(report: dict[str, Any]) -> None
     assert "nsdelegate" in report["environment"]["cgroup2 options"]
 
 
+def test_the_worker_has_no_privilege_to_gain(report: dict[str, Any]) -> None:
+    none = "0000000000000000"
+
+    assert report["environment"]["privileges"] == {
+        "NoNewPrivs": "1",
+        "CapInh": none,
+        "CapPrm": none,
+        "CapEff": none,
+        "CapBnd": none,
+        "CapAmb": none,
+    }
+    assert report["environment"]["setuid files"] == []
+
+
 def test_netfilter_sockets_are_refused(report: dict[str, Any]) -> None:
-    assert report["netlink"] == {"route": "opened", "netfilter": "EPERM"}
+    # EPROTONOSUPPORT is the profile's own answer; a 32-bit call ends in the
+    # filter's bad-architecture action, SIGSYS.
+    assert report["netlink"] == {
+        "route": "opened",
+        "netfilter": "EPROTONOSUPPORT",
+        "netfilter, protocol's high bits": "EPROTONOSUPPORT",
+        "netfilter, family's high bits": "EPROTONOSUPPORT",
+        "netfilter, 32-bit socketcall": "killed by signal 31",
+    }
 
 
 def test_a_call_to_another_host_fails_fast(report: dict[str, Any]) -> None:
@@ -186,6 +208,20 @@ def test_the_sandbox_sees_only_its_own_processes(report: dict[str, Any]) -> None
     processes = report["probe"]["processes"]
 
     assert sorted(processes.values()) == ["/usr/bin/bwrap", "/usr/local/bin/python3"]
+
+
+def test_the_sandbox_works_in_its_working_directory_read_only(
+    report: dict[str, Any],
+) -> None:
+    assert report["probe"]["cwd"] == report["probe"]["workdir"]
+    assert report["probe"]["cwd writable"] is False
+
+
+def test_the_wrapper_runs_the_engine_in_its_runs_cgroup(
+    report: dict[str, Any],
+) -> None:
+    assert report["probe"]["pids.peak"] >= 1
+    assert report["session"]["pids.peak"] >= 1
 
 
 def test_the_sandbox_has_no_sys(report: dict[str, Any]) -> None:
