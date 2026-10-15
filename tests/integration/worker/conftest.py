@@ -188,12 +188,13 @@ def podman(pytestconfig: pytest.Config) -> Iterator[DockerClient]:
             pytest.fail("Podman is not available on CI")
         pytest.skip("Podman is not available")
 
-    env = {**os.environ, **user_session_env()}
+    session_env, session = user_session_env()
+    env = {**os.environ, **session_env}
     # Written as the session runs, not captured: the pull request records
-    # which Podman and network each machine ran.
+    # which Podman, network and user session each machine ran.
     reporter = pytestconfig.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
-        reporter.write_line(describe_podman(env))
+        reporter.write_line(f"{describe_podman(env)}, user session {session}")
     root = Path(tempfile.mkdtemp(prefix="corvo-agents-"))
     try:
         with podman_service(root, env) as client:

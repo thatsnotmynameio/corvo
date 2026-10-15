@@ -31,8 +31,9 @@ def podman_available() -> bool:
     return subprocess.run(["podman", "info"], capture_output=True).returncode == 0
 
 
-def user_session_env() -> dict[str, str]:
-    """The environment of the test user's systemd session, started if missing.
+def user_session_env() -> tuple[dict[str, str], str]:
+    """The environment of the test user's systemd session, started if missing,
+    and how the session came to be, for the session's log.
 
     Rootless Podman sets a container's cgroup limits through the user's
     systemd. Without a session it falls back to cgroupfs, where cgroup v2
@@ -43,7 +44,9 @@ def user_session_env() -> dict[str, str]:
     """
     runtime_dir = Path(f"/run/user/{os.getuid()}")
     bus = runtime_dir / "bus"
+    session = "existing"
     if os.environ.get("CI") and not bus.exists():
+        session = "started with lingering"
         user = os.environ.get("USER") or str(os.getuid())
         subprocess.run(["sudo", "loginctl", "enable-linger", user], check=True)
         for _ in range(30):
@@ -53,11 +56,12 @@ def user_session_env() -> dict[str, str]:
         else:
             raise RuntimeError(f"No user session bus at {bus} within 30 seconds")
     if not bus.exists():
-        return {}
-    return {
+        return {}, "none"
+    env = {
         "XDG_RUNTIME_DIR": str(runtime_dir),
         "DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus}",
     }
+    return env, session
 
 
 def describe_podman(env: dict[str, str]) -> str:
