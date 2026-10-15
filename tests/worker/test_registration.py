@@ -1,11 +1,12 @@
-"""The worker registers every task and workflow the two areas define.
+"""The worker registers every task and workflow the three areas define.
 
 Hatchet starts a worker without complaint when a definition is missing from
 its list, and lets a duplicate name win silently. This test checks WORKFLOWS
-against every module-level definition in corvo.worker.tasks and
-corvo.worker.workflows, and names each one that is unregistered, listed twice
-or sharing a name. It also fails on what would hide a definition from it: a
-directory without __init__.py, or a module that fails to import.
+against every module-level definition in corvo.worker.tasks,
+corvo.worker.workflows and corvo.worker.agents, and names each one that is
+unregistered, listed twice or sharing a name. It also fails on what would
+hide a definition from it: a directory without __init__.py, or a module that
+fails to import.
 """
 
 import importlib
@@ -20,13 +21,14 @@ import pytest
 from hatchet_sdk import ClientConfig, Context, EmptyModel, Hatchet
 from hatchet_sdk.runnables.workflow import BaseWorkflow
 
+import corvo.worker.agents
 import corvo.worker.tasks
 import corvo.worker.workflows
 from corvo.settings import get_settings
 from corvo.worker.hatchet_client import hatchet
 from corvo.worker.worker import WORKFLOWS
 
-AREAS = [corvo.worker.tasks, corvo.worker.workflows]
+AREAS = [corvo.worker.tasks, corvo.worker.workflows, corvo.worker.agents]
 
 type Definition = tuple[str, BaseWorkflow[Any]]
 
