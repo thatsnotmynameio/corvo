@@ -18,16 +18,17 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     CLINotFoundError,
     ResultMessage,
-    SandboxSettings,
     query,
 )
 
+from corvo.agents.session import sandbox_settings
+from corvo.worker.agent_runtime.cgroups import read_keyed
 from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
 
 HERE = Path(__file__).parent
@@ -40,16 +41,8 @@ MIB = 1024**2
 # A secret the worker holds, which nothing in the sandbox may see.
 WORKER_SECRET = "gate-hatchet-token"
 
-SANDBOX = cast(
-    SandboxSettings,
-    {
-        "enabled": True,
-        "autoAllowBashIfSandboxed": True,
-        "allowUnsandboxedCommands": False,
-        "failIfUnavailable": True,
-        "network": {"allowedDomains": []},
-    },
-)
+# Every session's own sandbox settings, so the gate proves what agents run.
+SANDBOX = sandbox_settings()
 
 # The session's one Bash call: a marker, then the network interfaces the
 # command sees, which only the SDK's own sandbox narrows to loopback.
@@ -334,12 +327,6 @@ async def without_cli_path() -> str:
     return "no error"
 
 
-def cgroup_events(path: Path) -> dict[str, int]:
-    """A cgroup's memory.events or pids.events, as counts by name."""
-    lines = path.read_text().splitlines()
-    return {key: int(value) for key, value in (line.split() for line in lines)}
-
-
 def hog() -> dict[str, Any]:
     cgroup = run_cgroup("run-gate-hog", 64 * MIB, 32)
     worker_cgroup = Path("/proc/self/cgroup").read_text()
@@ -353,11 +340,11 @@ def hog() -> dict[str, Any]:
     return {
         "returncode": ran.returncode,
         "stdout": ran.stdout.split("\n")[:-1],
-        "memory.events": cgroup_events(cgroup / "memory.events"),
-        "pids.events": cgroup_events(cgroup / "pids.events"),
+        "memory.events": read_keyed(cgroup / "memory.events"),
+        "pids.events": read_keyed(cgroup / "pids.events"),
         "worker cgroup unchanged": Path("/proc/self/cgroup").read_text()
         == worker_cgroup,
-        "worker memory.events": cgroup_events(AGENTS / "worker" / "memory.events"),
+        "worker memory.events": read_keyed(AGENTS / "worker" / "memory.events"),
     }
 
 
