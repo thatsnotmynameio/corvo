@@ -19,9 +19,9 @@ class ToneInput(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+# The schema the session's structured output must match. Its JSON Schema goes
+# to the model, docstrings included, so the comments here are not docstrings.
 class ToneVerdict(BaseModel):
-    """The schema the session's structured output must match."""
-
     tone: Tone
 
 
