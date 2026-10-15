@@ -38,6 +38,7 @@ from hatchet_sdk import Context
 from pydantic import BaseModel, ValidationError
 
 from corvo.agents.envelope import ENVELOPE, AgentRequest, Failed, RunReport, Succeeded
+from corvo.agents.frame import MAX_UNTRUSTED_BYTES
 from corvo.worker.agent_runtime.spec import (
     MANAGED,
     Credential,
@@ -48,9 +49,6 @@ from corvo.worker.agent_runtime.spec import (
     session_budget,
     task_run_label,
 )
-
-# The largest envelope or probe report the worker reads.
-MAX_UNTRUSTED_BYTES = 1024 * 1024
 
 # Forwarded stderr: each line behind the prefix, so no line the agent prints
 # passes for one of the worker's own, cut to MAX_LINE characters, up to
