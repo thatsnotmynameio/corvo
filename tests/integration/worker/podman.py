@@ -31,37 +31,23 @@ def podman_available() -> bool:
     return subprocess.run(["podman", "info"], capture_output=True).returncode == 0
 
 
-def user_session_env() -> tuple[dict[str, str], str]:
-    """The environment of the test user's systemd session, started if missing,
-    and how the session came to be, for the session's log.
+def user_session_env() -> dict[str, str]:
+    """The environment of the test user's systemd session, when there is one.
 
     Rootless Podman sets a container's cgroup limits through the user's
     systemd. Without a session it falls back to cgroupfs, where cgroup v2
     gives an unprivileged user no controller and a limited container fails
-    to start. On CI the runner may have no session: lingering starts one, with
-    the passwordless sudo GitHub's runners have. Elsewhere the developer's
-    own session is used as is.
+    to start. GitHub's runners already have one, as a CI run showed, so the
+    suite starts none of its own.
     """
     runtime_dir = Path(f"/run/user/{os.getuid()}")
     bus = runtime_dir / "bus"
-    session = "existing"
-    if os.environ.get("CI") and not bus.exists():
-        session = "started with lingering"
-        user = os.environ.get("USER") or str(os.getuid())
-        subprocess.run(["sudo", "loginctl", "enable-linger", user], check=True)
-        for _ in range(30):
-            if bus.exists():
-                break
-            time.sleep(1)
-        else:
-            raise RuntimeError(f"No user session bus at {bus} within 30 seconds")
     if not bus.exists():
-        return {}, "none"
-    env = {
+        return {}
+    return {
         "XDG_RUNTIME_DIR": str(runtime_dir),
         "DBUS_SESSION_BUS_ADDRESS": f"unix:path={bus}",
     }
-    return env, session
 
 
 def describe_podman(env: dict[str, str]) -> str:

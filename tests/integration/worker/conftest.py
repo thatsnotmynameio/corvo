@@ -188,8 +188,9 @@ def podman(pytestconfig: pytest.Config) -> Iterator[DockerClient]:
             pytest.fail("Podman is not available on CI")
         pytest.skip("Podman is not available")
 
-    session_env, session = user_session_env()
+    session_env = user_session_env()
     env = {**os.environ, **session_env}
+    session = "found" if session_env else "none"
     # Written as the session runs, not captured: the pull request records
     # which Podman, network and user session each machine ran.
     reporter = pytestconfig.pluginmanager.get_plugin("terminalreporter")
