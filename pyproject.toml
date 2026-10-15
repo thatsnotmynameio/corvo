@@ -54,3 +54,6 @@ testpaths = ["tests"]
 # client's connections live.
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
+markers = [
+    "fake_cli: runs the SDK's real transport, on the fake claude CLI only",
+]
