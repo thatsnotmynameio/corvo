@@ -24,6 +24,12 @@ dependencies = [
 [project.scripts]
 corvo-worker = "corvo.worker.worker:main"
 
+# corvo runs on Linux only: its image, CI, and the rootless Podman its agents
+# run on. The lock resolves for Linux alone, so it carries no package another
+# platform alone needs, such as docker's pywin32.
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"
