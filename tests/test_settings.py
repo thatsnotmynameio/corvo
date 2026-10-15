@@ -41,21 +41,22 @@ def test_the_credential_kind_rejects_an_unknown_kind(
         Settings()
 
 
-def test_agents_are_not_configured_without_their_variables() -> None:
-    assert not Settings().agents_configured()
+def test_the_cgroup_root_defaults_to_the_delegated_agents_cgroup() -> None:
+    assert Settings().agent_cgroup_root == "/sys/fs/cgroup/agents"
 
 
-@pytest.mark.parametrize(
-    ("socket", "root", "configured"),
-    [
-        ("/run/corvo/podman.sock", "", False),
-        ("", "/srv/corvo/agents", False),
-        ("/run/corvo/podman.sock", "/srv/corvo/agents", True),
-    ],
-)
-def test_agents_are_configured_by_the_socket_and_the_root(
-    socket: str, root: str, configured: bool
+def test_the_settings_hold_no_credential() -> None:
+    with pytest.raises(ValidationError, match="agent_credential"):
+        Settings(agent_credential="sk-ant-real")  # type: ignore[call-arg]
+
+
+def test_the_worker_profile_defaults_to_main() -> None:
+    assert Settings().worker_profile == "main"
+
+
+def test_the_worker_profile_reads_its_variable(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = Settings(agent_podman_socket=socket, agent_root=root)
+    monkeypatch.setenv("CORVO_WORKER_PROFILE", "agents")
 
-    assert settings.agents_configured() is configured
+    assert Settings().worker_profile == "agents"
