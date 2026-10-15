@@ -15,10 +15,11 @@ runs an agent itself.
    take 15 seconds, and the kill comes first.
 4. However the session ended, result, failure, budget, Hatchet's timeout or
    cancel, it kills the cgroup before anything else. Then it cancels the
-   child, which lets the SDK close its transport, waits until the cgroup is
-   empty, killing it again on every poll, and removes it, all shielded and
-   within CLEANUP_TIMEOUT. Hatchet frees the slot a second after a cancel
-   without waiting for this, which is why the kill comes first.
+   child, which lets the SDK close its transport, waits until the child is
+   done and the cgroup is empty, killing it again on every poll, and removes
+   it, all shielded and within CLEANUP_TIMEOUT. Hatchet frees the slot a
+   second after a cancel without waiting for this, which is why the kill
+   comes first.
 
 What a session hands back or prints is untrusted (R29): the output is the
 agent's validated model, every line it prints reaches the run log behind a
@@ -265,7 +266,13 @@ async def end(
     emptied = False
     try:
         async with asyncio.timeout(CLEANUP_TIMEOUT):
-            await asyncio.wait({child})
+            # The child closes the SDK's transport, which waits for the
+            # engine to exit: killing on every poll meanwhile catches a
+            # wrapper that joined just after the first kill, rather than
+            # leaving the close to wait on it.
+            while not child.done():
+                cgroup.kill()
+                await asyncio.wait({child}, timeout=POLL_INTERVAL)
             # A wrapper that joined just after a kill is caught by the next.
             while cgroup.populated():
                 cgroup.kill()

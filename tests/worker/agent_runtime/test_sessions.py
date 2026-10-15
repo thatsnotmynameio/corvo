@@ -257,7 +257,7 @@ async def test_a_session_past_its_budget_is_killed_before_its_cleanup(
     with pytest.raises(AgentFailed, match="past its session budget"):
         await run(agent)
 
-    assert tree.events == ["create", "kill", "agent cleanup", "remove"]
+    assert tree.events == ["create", "kill", "kill", "agent cleanup", "remove"]
 
 
 async def test_a_cancel_kills_the_cgroup_before_the_agent_s_cleanup(
@@ -273,7 +273,7 @@ async def test_a_cancel_kills_the_cgroup_before_the_agent_s_cleanup(
     with pytest.raises(asyncio.CancelledError):
         await running
 
-    assert tree.events == ["create", "kill", "agent cleanup", "remove"]
+    assert tree.events == ["create", "kill", "kill", "agent cleanup", "remove"]
     assert ctx.lines[-1] == (
         "agent tone: cancelled, cost=unknown turns=unknown session=unknown"
     )
@@ -328,6 +328,28 @@ async def test_a_cancel_during_the_end_still_ends_the_log_with_the_report(
     await asyncio.sleep(0)
 
     assert ctx.lines[-1] == "agent tone: cancelled, cost=0.0042 turns=2 session=s-1"
+
+
+async def test_the_cgroup_is_killed_on_every_poll_while_the_agent_closes(
+    tree: Tree, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sessions, "POLL_INTERVAL", 0.01)
+    monkeypatch.setattr(sessions, "session_budget", lambda elapsed: 0.01)
+
+    async def close_slowly(session: Session) -> None:
+        # As the SDK's transport close waits for the engine to exit.
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0.05)
+            tree.events.append("agent closed")
+
+    with pytest.raises(AgentFailed, match="past its session budget"):
+        await run(Agent(close_slowly))
+
+    closed = tree.events.index("agent closed")
+    assert tree.events[closed:] == ["agent closed", "remove"]
+    assert tree.events[:closed].count("kill") >= 3
 
 
 async def test_a_process_joining_after_the_kill_is_killed_by_a_poll(
