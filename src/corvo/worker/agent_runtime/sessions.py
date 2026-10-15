@@ -31,6 +31,7 @@ log, which still reaches the operator after a cancel.
 """
 
 import asyncio
+import contextlib
 import sys
 import time
 import unicodedata
@@ -60,6 +61,12 @@ from corvo.worker.defaults import (
 STDERR_PREFIX = "agent stderr: "
 MAX_LINE = 500
 MAX_LINES = 900
+# The cut of a single value the session gave, such as its session ID or a
+# failure's reason, inside one of the worker's own lines.
+MAX_VALUE = 100
+
+# A failure's reason when the kernel killed the session for lack of memory.
+OUT_OF_MEMORY = "out of memory"
 
 # How long the end may take, under a cancel or a timeout, and how often it
 # looks whether the cgroup has emptied.
@@ -111,7 +118,7 @@ def check_workdir(root: str, name: str) -> Path:
     if not root:
         raise InvalidWorkdir("CORVO_AGENT_ROOT is not set")
     workdirs = (Path(root) / "workdirs").resolve()
-    shown = repr(printable(name, 100))
+    shown = repr(printable(name, MAX_VALUE))
     if not name or Path(name).is_absolute():
         raise InvalidWorkdir(f"{shown} is not a name below {workdirs}")
     try:
@@ -160,7 +167,7 @@ def session_env(
 
 def report_line(agent: str, outcome: str, report: RunReport) -> str:
     def shown(value: object) -> str:
-        return "unknown" if value is None else printable(str(value), 100)
+        return "unknown" if value is None else printable(str(value), MAX_VALUE)
 
     return (
         f"agent {agent}: {outcome}, cost={shown(report.total_cost_usd)} "
@@ -222,11 +229,9 @@ async def run_agent[I: BaseModel, O: BaseModel](
         finished = child.done()
         # First, with no await before it: after a cancel, Hatchet frees the
         # slot without waiting for what follows.
-        try:
+        # On a failure, the end kills again, and logs what fails.
+        with contextlib.suppress(OSError):
             cgroup.kill()
-        except OSError:
-            # The end kills again, and logs what fails.
-            pass
         ending = asyncio.ensure_future(end(agent, cgroup, child, cancelled, ctx.log))
         out_of_memory = await asyncio.shield(ending)
     return conclude(agent, child, finished, out_of_memory, ctx.log)
@@ -270,7 +275,7 @@ async def end(
     if cgroup.path in in_flight:
         log(f"agent {agent}: {cgroup.path.name} is left for the next start's sweep")
     if cancelled:
-        outcome = "out of memory" if out_of_memory else "cancelled"
+        outcome = OUT_OF_MEMORY if out_of_memory else "cancelled"
         log(report_line(agent, outcome, RunReport()))
     return out_of_memory
 
@@ -297,6 +302,7 @@ def conclude[O](
         return output
 
     if out_of_memory:
-        reason = "out of memory"
-    log(report_line(agent, printable(reason, 100), report))
-    raise AgentFailed(f"agent {agent} failed: {printable(reason, 100)}")
+        reason = OUT_OF_MEMORY
+    shown = printable(reason, MAX_VALUE)
+    log(report_line(agent, shown, report))
+    raise AgentFailed(f"agent {agent} failed: {shown}")

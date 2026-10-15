@@ -101,13 +101,8 @@ async def test_a_session_returns_its_output_and_leaves_no_cgroup(tree: Tree) -> 
     assert ctx.lines[-1] == "agent tone: succeeded, cost=0.0042 turns=2 session=s-1"
     assert tree.path == tree.root / "run-task-1"
     assert tree.events == ["create", "kill", "remove"]
-    assert tree.removed == {
-        "memory.max": str(2 * 1024**3),
-        "memory.swap.max": "0",
-        "memory.oom.group": "1",
-        "cpu.max": "100000 100000",
-        "pids.max": "256",
-    }
+    # Their values are test_cgroups.py's.
+    assert tree.removed == cgroups.LIMITS
     assert sessions.in_flight == set()
 
 
