@@ -51,9 +51,11 @@ def no_claude(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -
     Both query() and ClaudeSDKClient connect through SubprocessCLITransport,
     which the SDK does not export: this leans on its internals
     (claude_agent_sdk/_internal/transport/subprocess_cli.py). The fake CLI's
-    contract test, marked fake_cli, runs the real transport on the fake.
+    contract test, marked fake_cli, runs the real transport on the fake. Only a
+    mark on the test function itself counts, so marking a module or a class
+    lets none of its other tests through.
     """
-    if request.node.get_closest_marker("fake_cli") is None:
+    if not any(mark.name == "fake_cli" for mark in request.node.own_markers):
 
         async def connect(self: SubprocessCLITransport) -> None:
             pytest.fail(
