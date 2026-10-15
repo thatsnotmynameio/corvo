@@ -1,5 +1,5 @@
 ---
-title: Agents Skeleton U2 Agent Boundaries, Settings and Guard - Plan
+title: Agents Skeleton U2 Agent Boundaries, Settings, Guard and Worker Profiles - Plan
 type: feat
 date: 2026-10-15
 topic: agents-skeleton-u2-boundaries
@@ -9,35 +9,44 @@ origin: docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md
 execution: code
 ---
 
-# Agents Skeleton U2 Agent Boundaries, Settings and Guard - Plan
+# Agents Skeleton U2 Agent Boundaries, Settings, Guard and Worker Profiles - Plan
 
 ## Goal Capsule
 
-- **Objective:** The three agent areas exist, and the import rules, the no-Claude test guard and the agent settings are enforced before any agent exists.
-- **Parent:** `docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md` holds the whole plan; this is part 2 of 7. This file is meant to be enough: open the parent only when something you need is missing here.
-- **Depends on:** none (it sits above U1 in the stack). **Blocks:** U3 builds on this part directly; U4 to U7 through it.
-- **Stop conditions:** stop and ask when the SDK, Hatchet or Podman behaves differently from this plan on the pinned versions, or when CI's 90% coverage floor cannot be held without excluding code.
+- **Objective:** The import rules, the settings and the no-Claude guard hold for the profile shape before any agent exists. `corvo-worker` serves the profile it is given, and the `agents` profile's empty list is registered and tested.
+- **Parent:** `docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md` holds the whole plan; this is part 2 of 9 in stack order (unit U2). This file is meant to be enough: open the parent only when something you need is missing here. When the two differ, the parent wins.
+- **Depends on:** U1; it sits on `feat/agents-u1-isolation-gate` in the stack. **Blocks:** U3 builds on this part directly; U4 to U7 through it.
+- **Stop conditions:** stop and ask when the SDK or Hatchet behaves differently from this plan on the pinned versions, or when CI's 90% coverage floor cannot be held without excluding code.
 
 ## Builds on
 
-Already in the stack below; read the code, not those plans.
+Read the code on the branches named here, not the plans that produced it.
 
-- U1: a rootless Podman fixture in `tests/integration/worker/`; this part does not use it.
+- U1: the SDK pin, the Linux-only lock, and `corvo.worker.agent_runtime.sandbox`, which KTD2's fifth rule holds to the standard library.
+- #34's code on `feat/agents-u2-boundaries`, reworked on top of U1:
+  - 5ee4c09 keeps only the three empty agent areas; its pin moved to U1.
+  - b3bc08e (settings) is trimmed and extended per KTD12, and gains `worker_profile`.
+  - b0ea5b6, 9603eed and 71f9efc (the boundary test) keep their pure checker and fixtures; the fourth rule is narrowed and the fifth added.
+  - 1cfec79 and a896c65 (the guard) and 1698f6c (Trunk's `corvo-agents` collection) stay as they are.
+  - e36a843 (the registration test) becomes the walk over `PROFILES`.
+- On `main`: `src/corvo/worker/worker.py`'s `WORKFLOWS`, `create_worker()` and `main()`, whose list moves to the `main` profile.
 
 ## Product Contract
 
 ### Summary
 
-Adds the pinned `claude-agent-sdk`, the empty `corvo.agents`, `corvo.core.agents` and `corvo.worker.agents` packages, the AST import-boundary test, the guard that fails any test reaching Claude, the agent settings, and the agents area in the registration test.
+Adds the three empty agent areas, the AST import-boundary test with its rules for the profile shape, the agent settings of the bubblewrap design, the no-Claude guard, and the worker's permission profiles: `corvo.worker.profiles` with its `main` and `agents` profiles, the `main()` that serves the one `CORVO_WORKER_PROFILE` names, and the registration test that walks them.
 
 ### Context
 
-The boundary and the guard must hold before the first agent lands, so no agent can be written against them. R2 and R22 are completed here; R6 and R12 are completed by U4, which uses the area and the settings.
+The boundary and the guard must hold before the first agent lands, so no agent can be written against them. The profiles replace a second worker module (KTD26, owner-directed): what differs between the main worker and the agent worker is configuration, so one `corvo-worker` serves either. R2 and R22 are completed here; R6, R12 and R13 are completed by U4, U5 and U9, which register agents, hand the credential to the proxy and start the agent worker. #37 builds on this part's profiles for `CORVO_WORKER_NAME` and the compose test.
 
 ### Key Decisions
 
 - **An agent is a Hatchet task that runs one agent session.** Workflows spawn it like any task. (session-settled: user-directed — chosen over an agent outside Hatchet that calls tasks as tools: both will exist, starting with this one.) Governs R6, R20.
 - **Agent code lives in its own Hatchet-free package; the worker keeps only a thin task.** (session-settled: user-directed — chosen over an agents area inside `corvo.worker` that imports the SDK next to Hatchet.) Governs R1, R2, R6.
+- **The agent worker is a compose service of its own.** (session-settled: user-approved — chosen over a systemd service on the host: it keeps one deploy path and the Hatchet engine's gRPC internal, at the cost of R27's container settings and a profile kept in step with Docker's.) Governs R13, R27.
+- **The Claude credential lives in a proxy and the agent worker's egress is cut, from the first run.** Without both, a session that reads its own engine's credential could send it out. (session-settled: user-approved — chosen over deferring the proxy and `--network none`, as the Podman design did.) Governs R12, R16.
 - **The Claude credential is either an API key or a subscription OAuth token, chosen per environment.** (session-settled: user-directed — chosen over an API key only and over a subscription token only.) Governs R12.
 - **No automated test calls Claude; a manual run on Haiku proves each example.** (session-settled: user-directed — chosen over an e2e job against real Claude on every push to main, and over an on-demand e2e job.) Governs R22, R25.
 
@@ -49,11 +58,15 @@ The boundary and the guard must hold before the first agent lands, so no agent c
 
 **Hatchet integration**
 
-- R6. Each agent has a thin Hatchet task in `corvo.worker.agents` with an explicit name and Pydantic input and output models. The task is registered in `WORKFLOWS`, and the registration test covers the area.
+- R6. Each agent has a thin Hatchet task in `corvo.worker.agents` with an explicit name and Pydantic input and output models. Agent tasks are registered only in the agent worker's list, which holds nothing else, and the registration test covers both workers.
 
 **Agent execution**
 
-- R12. The Claude credential comes from corvo's settings, as an API key or a subscription OAuth token, and each environment chooses which.
+- R12. The Claude credential is set in the deployment's environment, as an API key or a subscription OAuth token, and each environment chooses which. Only the proxy of R16 receives it; corvo's settings hold only which kind it is.
+
+**Isolation**
+
+- R13. Agent tasks run only on a dedicated agent worker, which holds the Hatchet token but neither the database password nor the Claude credential.
 
 **Tests**
 
@@ -66,121 +79,109 @@ The boundary and the guard must hold before the first agent lands, so no agent c
 
 ### Scope Boundaries
 
-- No agent, task or container code.
+Not in this part:
+
+- No agent, task or session piece (U3, U4).
+- No `before_start` or `on_sigterm` for the `agents` profile (U9); `serve` runs them when a profile has them.
+- No `CORVO_WORKER_NAME` and no compose test (#37).
+
+The parent's Scope Boundaries hold for every part.
 
 ### Dependencies / Assumptions
 
-- claude-agent-sdk 0.2.167 (2026-10-14, bundling CLI 2.1.300) ships only `manylinux_2_17` wheels, which `python:3.14.7-slim` satisfies, and bundles a native `claude` binary of about 250 MB. It releases almost daily.
+- Hatchet API tokens are scoped per tenant, with no per-worker or narrower token (Hatchet security docs). A task goes only to workers that registered it, and worker labels attract tasks without keeping others away (Hatchet worker and worker-affinity docs). In hatchet-sdk 1.42.1, `DesiredWorkerLabel.required` defaults to `False` (`hatchet_sdk/types/labels.py:69`), so isolation by registration is the only exclusion this plan relies on.
+- claude-agent-sdk 0.2.167 (2026-10-14, bundling CLI 2.1.300) ships only `manylinux_2_17` wheels, which `python:3.14.7-slim` satisfies, and bundles a native `claude` binary of about 250 MB. It releases almost daily. `query()` runs that engine as a subprocess over stdio, and `ClaudeAgentOptions.env` is merged over the inherited environment (`_internal/transport/subprocess_cli.py`), so only a sandbox that starts from an empty environment keeps the worker's variables out of the engine.
 - The subscription OAuth token is, by Anthropic's terms, for ordinary individual use by the subscriber. Products and services built on the Agent SDK must use API keys (`legal-and-compliance.md`; Agent SDK `overview.md`). A `claude setup-token` token lasts one year.
 
 ## Planning Contract
 
 ### Key Technical Decisions
 
-- KTD2. **R2 is enforced by an AST test over `src/corvo`, not by ruff.** `tests/test_import_boundaries.py` parses every module and builds the import graph inside `corvo`. Importing `a.b.c` also counts its parent packages' `__init__` modules, which stay empty. The test fails, naming the module and the import, when:
-  1. a module outside `corvo.agents` imports `claude_agent_sdk`;
-  2. a module in `corvo.worker` imports, directly or transitively, a `corvo` module that imports `claude_agent_sdk`;
-  3. a module in `corvo.agents` imports `hatchet_sdk` or `corvo.worker`;
-  4. a module in `corvo.core` imports `corvo.agents` or `claude_agent_sdk`.
+Copied from the parent; a KTD cited here but not copied is in the parent.
 
-  The checks run as a pure function, fed by test-declared sources in the same test module, and once against the real tree, as `test_registration.py` does. Ruff cannot do it: per-file TID251 ignores drop every ban for `src/corvo/worker/**` and `src/corvo/server/api/**`, and CI's `ruff check --config=ruff.toml` ignores nested config files. `ruff.toml` stays unchanged. Governs R2.
-- KTD10. **Before the worker starts serving, `main()` prepares agents in at most 45 seconds, and a failure only disables them.** When agents are configured (KTD12), it runs, in order:
-  1. Check that the image is present.
-  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec, with no credential, no working directory and a scratch run directory. It writes a report into that directory:
-     - the fingerprint;
-     - `memory.max`, `cpu.max` and `pids.max` read inside the container;
-     - the effective capabilities;
-     - the environment variable names;
-     - whether the root filesystem is read-only;
-     - the flags of the `/tmp` and `/home/agent` mounts, read from `/proc/self/mounts`;
-     - whether a one-second TCP connect reaches the container's default gateway and `169.254.169.254:80`.
-  3. Compare the report with the spec and with the worker's own fingerprint. The probe step then force-removes its container by label, whatever the outcome.
-  4. Sweep (KTD11).
-
-  - **When a check fails.** A limit, a flag or a fingerprint that differs, or any error, disables agents, with the reason logged. Every other task keeps working.
-  - **When egress is open.** A reachable gateway or metadata address means KTD16's nftables rule is missing. With `agent_require_egress_block` set (KTD12), it disables agents. Otherwise it logs a warning, which is the default for development and CI, which have no such rule.
-  - **Recovery.** Agents stay disabled until the worker restarts. Agent runs fail at once with the logged reason, which is how the operator learns of it.
-  - **The fingerprint.** It is a SHA-256 over the `*.py` files and `prompts/**` under `corvo/agents/` and `corvo/core/agents/`, sorted by relative path, with `__pycache__` and `*.pyc` excluded, plus the installed `claude-agent-sdk` version. `corvo.agents.fingerprint` computes it from the standard library alone, and each side computes it over its own installed copy. A stale agent image is therefore refused instead of running old code. The report comes from the image under test, so the fingerprint detects a stale image, not a tampered one (Risks).
-  - **The cgroup check.** The probe is also R14's cgroup check: on cgroup v2, an undelegated controller makes the container fail to start.
-
-  Governs R14, R15, R16.
-- KTD12. **Agent settings are five `CORVO_AGENT_*` fields plus the credential, and an empty socket or root means "agents not configured".**
-  - The fields are `agent_podman_socket`, `agent_root`, `agent_image` (default `localhost/corvo-agent:latest`), `agent_credential_kind: Literal["api_key", "oauth_token"]` and `agent_require_egress_block: bool = False` (KTD10), plus `agent_credential`.
-  - They are plain `str`, as `settings.py` holds its other secrets.
-  - With the socket or the root empty, an agent task fails at once with "agents are not configured", and `main()` skips KTD10.
-  - An empty credential while the rest is configured disables agents in KTD10.
-  - The container receives the credential as `ANTHROPIC_API_KEY` or as `CLAUDE_CODE_OAUTH_TOKEN`, never both.
+- KTD2. **R2 stays an AST test over `src/corvo`, with its transitive rule narrowed to the main profile.** Three rules stay: no module outside `corvo.agents` imports `claude_agent_sdk`; `corvo.agents` imports neither `hatchet_sdk` nor `corvo.worker`; `corvo.core` imports neither `corvo.agents` nor the SDK. The fourth rule now reads: no module the main profile imports reaches a module that imports the SDK. The main profile means `corvo.worker.worker`, `corvo.worker.profiles`, `corvo.worker.profiles.main`, `corvo.worker.tasks`, `corvo.worker.workflows`, `corvo.worker.agent_calls` and everything they import (KTD26); `corvo.server`, which will trigger agents through the same stubs, is held to the same rule. `corvo.worker.agents`, `corvo.worker.agent_runtime` and `corvo.worker.profiles.agents` reach the SDK through `corvo.agents`, and never import it themselves. A fifth rule keeps `corvo.worker.agent_runtime.sandbox`, and anything it imports, to the standard library: it runs as the wrapper process before it has joined its cgroup (KTD20). Governs R2, R6.
+- KTD12. **Agent settings are `CORVO_AGENT_*` fields for the root, the kind, the proxy, the cgroup root and the engine.**
+  - Removed: `agent_podman_socket`, `agent_image`, `agent_require_egress_block` and `agent_credential`. The credential moves to the proxy's environment (R12).
+  - Kept: `agent_root` and `agent_credential_kind: Literal["api_key", "oauth_token"]`.
+  - Added: `agent_proxy_url` (the sessions' `ANTHROPIC_BASE_URL`), `agent_cgroup_root` (default `/sys/fs/cgroup/agents`) and `agent_engine`, the engine's path. The `agent-worker` image sets it to the engine KTD13 moved; the integration overlay points it at the fake CLI, and KTD10 logs it at start.
+  - Each session gets a fixed placeholder as `ANTHROPIC_API_KEY` for `api_key`, or as `CLAUDE_CODE_OAUTH_TOKEN` for `oauth_token`, never both. The engine then sends `x-api-key` or `Authorization: Bearer`, which the proxy replaces (KTD22).
   - The settings comment and `docs/agents.md` carry the OAuth terms (Dependencies).
 
-  Governs R12, R14.
-- KTD13. **The agent image is an `agent` stage of the repository's `Dockerfile`, and the SDK is an exact-pinned runtime dependency.**
-  - The existing stage is named `app`. The `agent` stage builds from it, and sets `WORKDIR /workspace` (empty in the image), `HOME=/home/agent` and `ENTRYPOINT ["corvo-agent"]`.
-  - The file ends with a closing `FROM app`. A build without `--target`, which is what compose's `build: .` runs, still produces today's app image, so `compose.yaml` stays unchanged.
-  - The operator builds the agent image into the dedicated user's store with `podman build --target agent`.
-  - `claude-agent-sdk==0.2.167` sits in `[project].dependencies`, so the app image carries it too. A dependency group kept out of the app image fails in CI, whose fixed `uv run` installs only the default groups. KTD2 already keeps the worker from importing it.
-  - `docker` joins the runtime dependencies and `types-docker` the dev group.
+  Governs R12, R13.
+- KTD14. **Tests replace the SDK at the same seams, and the compose stack is the guard for the agent worker.**
+  - **The pytest guard** in `tests/conftest.py` is unchanged. It removes the credential variables, points `ANTHROPIC_BASE_URL` at a closed port, and fails any unreplaced transport `connect`, except in `fake_cli` tests (R22, AE8).
+  - **Unit seam.** `ScriptedQuery` replaces `query` on an agent's module and records the options (R23).
+  - **Fake CLI.** `tests/agents/fake_claude.py` stays the engine stand-in. It gains a `fake:hog` scenario that allocates past its memory limit. It reports the environment names, the processes `/proc` lists, and whether its working directory is writable, all to stderr. In integration, the overlay bind-mounts it read-only into the agent worker and points `CORVO_AGENT_ENGINE` at it; `tests/agents/fake/Containerfile` goes.
+  - **The out-of-process guard.** The agent worker in compose runs the real transport, outside pytest's guard. What keeps it from Claude is the test stack itself: no service holds a real credential, every upstream is `tests/agents/scripted_api.py`, and the `agents` network has no route out. A test asserts the scripted API received only the dummy credential. R31's real engine runs in that stack alone, so the pytest guard admits nothing new.
 
-  Governs R13, R17.
-- KTD14. **Tests replace the SDK at three seams, and a guard stops everything else.**
-  - **The guard.** `tests/conftest.py` removes `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, and sets `ANTHROPIC_BASE_URL=http://127.0.0.1:9`. An autouse fixture replaces the SDK's subprocess transport `connect` with a failure that names the test. A marker opts out the fake-CLI contract test only. Governs R22, AE8.
-  - **Unit seam.** An agent's tests replace `query` on the agent module with a scripted async generator that yields real `ResultMessage` objects, and they record the options it received (R23).
-  - **Fake CLI.** `tests/agents/fake_claude.py` is a stand-in for the `claude` binary, after the SDK's own `tests/test_run_end_subprocess.py`:
-    - It answers `-v`, replies to each `control_request`, drives custom tools through `mcp_message`, and emits a `result`.
-    - It picks its scenario from markers in the prompt: success by default, `fake:max-turns`, `fake:api-error` or `fake:hang`.
-    - It returns a canned structured output chosen by the JSON Schema's title.
-    - It prints its argv and the isolation variables it saw to stderr.
-  - **Contract test.** An in-process test runs the fake through the real SDK via `cli_path`, under a 20-second `asyncio.timeout`. A protocol change in an SDK bump then fails fast instead of hanging.
-  - **Test image.** `tests/agents/fake/Containerfile` builds `FROM` the agent image, with only the fake in its build context. It overwrites the SDK's bundled `claude`, at a path found at build time, then asserts at build that `claude -v` prints the fake's version. It sets `ANTHROPIC_BASE_URL` to an unreachable address, so a missed overwrite cannot reach Claude.
+  Governs R22, R23, R24, R31.
+- KTD26. **One `corvo-worker` serves the permission profile that `CORVO_WORKER_PROFILE` names, and the main profile reaches agent tasks only through stubs.**
+  - `corvo.worker.profiles` holds the `Profile` type and `PROFILES`, which maps each profile's name to its module's dotted path: `main` to `corvo.worker.profiles.main`, `agents` to `corvo.worker.profiles.agents`. It imports no profile module.
+  - A profile module exposes one `PROFILE`, a frozen `Profile` with the Hatchet worker's name, its `workflows`, its `slots` (Hatchet's default when unset) and two optional hooks, `before_start` and `on_sigterm`:
+    - `main`: `corvo-worker`, every task and workflow, no hooks. Its list is today's `WORKFLOWS`, moved out of `corvo.worker.worker`.
+    - `agents`: `corvo-agent-worker`, every agent task and nothing else, `slots` equal to the cap's `max_runs` (KTD9), `before_start` running KTD10's checks and sweep, and `on_sigterm` running KTD19's hook.
+  - `corvo.worker.worker.main()` runs logging, reads `worker_profile` (`CORVO_WORKER_PROFILE`, default `main`) from the settings, and imports that profile's module by name with `importlib`. An unknown name exits with status 1, naming the known ones. It then calls `serve(profile)`, which runs `before_start`, creates `hatchet.worker(name, slots=…, workflows=…)`, installs `on_sigterm` after Hatchet's own handler, and starts. The console script stays `corvo-worker`, and no second one exists.
+  - Because the profile is imported by name, nothing the main profile imports reaches an agent task, and KTD2's fourth rule checks that.
+  - `corvo.worker.agent_calls` declares one `hatchet.stubs.task` per agent task, with the same name and the same input and output model classes. The output models come from the agents' `models.py`. A directory agent's task input, its agent input plus `workdir` (KTD7), is declared in `agent_calls` itself, and the task imports it from there, so stub and task share one class. Workflows on the main profile spawn agents through these stubs, so the main profile never imports an agent task.
+  - `tests/worker/test_registration.py` maps each area to its profile: tasks and workflows to `main`, agents to `agents`. It walks `PROFILES`, and fails when an area's definition is missing from its profile's list, when a definition sits on two profiles, or when a name repeats across profiles. It collects `agent_calls`' stubs apart from the areas' definitions, so a stub imported into a workflow module counts neither as unregistered nor as a name clash. Each stub must match an agent task's name and its input and output classes, and a stub on any profile's list fails, since it would take runs and raise.
+  - A later permission profile, such as one with database access or a GitHub bot's, is a module with its `PROFILE`, a line in `PROFILES`, an area pair in the registration test and a compose service, with no new worker code. #37 adds `CORVO_WORKER_NAME` over the profile's name, and a compose test that every service names a known profile and every profile has a service.
+  - (session-settled: user-directed — chosen over a second worker module with its own `main()`, list and console script, which copied the worker's start for what differs only in configuration.)
 
-  Governs R22, R23, R24.
+  Governs R6, R13, R20, R28; AE1.
 
 ## Implementation Units
 
-### U2. Agent boundaries, settings and the guard
+### U2. Agent boundaries, settings, the guard and the worker's profiles
 
-- **Goal:** the three agent areas exist and are empty. The import rules, the no-Claude guard and the agent settings are enforced before any agent exists.
-- **Requirements:** R2, R6, R12, R22, AE2, AE8; KTD2, KTD12, KTD13, KTD14.
-- **Dependencies:** none.
+- **Goal:** the import rules, the settings and the no-Claude guard hold for the profile shape before any agent exists. `corvo-worker` serves the profile it is given, and the `agents` profile's empty list is registered and tested.
+- **Requirements:** R2, R6, R12, R13, R22; AE2, AE8; KTD2, KTD12, KTD14, KTD26.
+- **Dependencies:** U1.
 - **Files:**
-  - Modify `pyproject.toml` and `uv.lock` (`claude-agent-sdk==0.2.167`).
   - Create `src/corvo/agents/__init__.py`, `src/corvo/core/agents/__init__.py` and `src/corvo/worker/agents/__init__.py`.
+  - Create `src/corvo/worker/profiles/__init__.py`, `src/corvo/worker/profiles/main.py`, `src/corvo/worker/profiles/agents.py` and `tests/worker/test_profiles.py`.
+  - Modify `src/corvo/worker/worker.py` and `tests/worker/test_worker.py`.
   - Modify `src/corvo/settings.py` and `tests/test_settings.py`.
-  - Create `tests/test_import_boundaries.py`.
-  - Modify `tests/conftest.py` (guard).
-  - Create `tests/agents/__init__.py` and `tests/agents/test_guard.py`.
-  - Modify `tests/worker/test_registration.py` (add `corvo.worker.agents` to `AREAS`, docstring), `src/corvo/worker/worker.py` (comment) and `tests/worker/test_worker.py` (comment).
-- **Approach:**
-  1. Add the settings fields of KTD12, each with a one-line comment. The OAuth comment carries the terms.
-  2. Write the boundary checker of KTD2 as a pure function over a mapping of module name to source, and test it with declared sources and once over `src/corvo`.
-  3. Add the guard of KTD14 to `tests/conftest.py`, next to the existing token shim, in the same comment style.
-  4. Extend the registration test's areas.
-- **Patterns to follow:** `tests/worker/test_registration.py` (a pure checker plus a real-tree test); `src/corvo/settings.py` field style.
+  - Create `tests/test_import_boundaries.py` and `tests/agents/test_guard.py`.
+  - Modify `tests/worker/test_registration.py`.
+- **Approach:** this is #34 reworked on top of U1, without its SDK pin, which U1 now holds.
+  1. Narrow the boundary test's fourth rule and add the fifth per KTD2, keeping its pure checker and its fixtures for the other rules.
+  2. Trim and extend the settings per KTD12, and add `worker_profile` per KTD26.
+  3. Keep the guard as it is.
+  4. `corvo.worker.profiles` per KTD26. `main` takes today's `WORKFLOWS`. `agents` holds an empty list, its name and its slots; its hooks come in U9. `corvo.worker.worker.main()` resolves the profile and calls `serve`.
+  5. The registration test walks `PROFILES` per KTD26.
+- **Patterns to follow:** the existing `tests/worker/test_registration.py` and `tests/worker/test_worker.py`; `src/corvo/settings.py` field style.
 - **Test scenarios:**
-  - Covers AE2. A declared module `corvo.worker.agents.x` importing `claude_agent_sdk` yields a problem naming it.
+  - Covers AE2. A declared `corvo.worker.agents.x` importing `claude_agent_sdk` directly yields a problem naming it.
   - Covers AE2. A declared `corvo.agents.x.agent` importing `hatchet_sdk` yields a problem, and so does one importing `corvo.worker.defaults`.
-  - A declared `corvo.worker.agents.x` importing `corvo.agents.x.models`, where `models` imports only Pydantic, yields none.
-  - The same import, where `models` imports `corvo.agents.x.agent`, which imports the SDK, yields a transitive problem naming the chain.
-  - A declared `corvo.core.agents.x` importing `corvo.agents` yields a problem.
+  - A declared `corvo.worker.workflows.x` importing `corvo.worker.agents.y`, which imports an agent that imports the SDK, yields a transitive problem naming the chain. The same chain from `corvo.server.api.x` does too.
+  - The same chain from `corvo.worker.agents.y` itself yields none.
+  - A declared `corvo.worker.agent_calls` importing `corvo.agents.x.models`, which imports only Pydantic, yields none.
+  - A declared `corvo.worker.agent_runtime.sandbox` importing `corvo.worker.defaults` yields a problem.
   - The real tree yields no problems.
-  - Covers AE8. A test that calls `claude_agent_sdk.query` with a trivial prompt, with nothing replaced, fails with the guard's message, and no subprocess starts.
-  - Settings read `CORVO_AGENT_CREDENTIAL_KIND=oauth_token` and reject `token`.
-  - With no agent variables set, the settings report agents as not configured.
-- **Verification:** the unit suite and `prek` pass. Adding `import claude_agent_sdk` to `src/corvo/worker/worker.py` fails the boundary test by name.
+  - Covers AE8. A test that calls `claude_agent_sdk.query` unreplaced fails with the guard's message, and no subprocess starts.
+  - Settings read `CORVO_AGENT_CREDENTIAL_KIND=oauth_token` and reject `token`. They default the cgroup root to `/sys/fs/cgroup/agents`, and no longer accept a credential field.
+  - A definition listed on both the `main` and the `agents` profile fails the registration test, and so does a name shared across the two lists.
+  - Every name in `PROFILES` imports a module whose `PROFILE` is a `Profile`, and importing `corvo.worker.profiles` imports no profile module.
+  - `main()` with `CORVO_WORKER_PROFILE` unset serves `main` as `corvo-worker` with every task and workflow. With `agents`, it serves `corvo-agent-worker` with the `agents` list and the cap's slots. With an unknown name, it exits with status 1, naming `main` and `agents`, before a Hatchet worker exists.
+  - `serve` runs `before_start` before creating the Hatchet worker, and installs `on_sigterm` after it. A profile without hooks starts the same as today's worker.
+- **Verification:** the unit suite and `prek` pass. Adding `import claude_agent_sdk` to `src/corvo/worker/worker.py` fails the boundary test by name, and so does importing `corvo.worker.profiles.agents` from it.
 
 ## Verification Contract
 
-- `uv run prek run --all-files`: ruff, format, mypy strict with `types-docker`, lockfile.
-- `uv run pytest tests/test_import_boundaries.py tests/test_settings.py tests/agents tests/core tests/worker`: unit tests, no Docker or Podman.
+- `uv run prek run --all-files`.
+- `uv run pytest tests/test_import_boundaries.py tests/test_settings.py tests/agents tests/core tests/worker`: unit tests, no Docker.
+- CI: `tnmn.io: python` on the pull request.
 
 ## Definition of Done
 
-- Every gate above passes locally and in CI.
-- U2 when adding `import claude_agent_sdk` to `src/corvo/worker/worker.py` fails the boundary test by name.
-- No abandoned attempt remains in the diff.
+- Every gate above passes locally, and CI passes on the pull request.
+- Adding `import claude_agent_sdk` to `src/corvo/worker/worker.py` fails the boundary test by name, and so does importing `corvo.worker.profiles.agents` from it.
+- `corvo-worker` with no profile set starts exactly as today's worker.
+- No abandoned attempt remains in the diff: no unused helpers, no commented-out code, no leftover tests.
 
 ## Execution: gh stack
 
-- **Stack, bottom to top:** `docs/agents-skeleton-plan` → `feat/agents-u1-podman-fixture` → `feat/agents-u2-boundaries` → `feat/agents-u3-tone-agent` → `feat/agents-u4-container-piece` → `feat/agents-u5-operations` → `feat/agents-u6-dir-summary` → `feat/agents-u7-dir-review`.
-- **This part:** branch `feat/agents-u2-boundaries`, on top of `feat/agents-u1-podman-fixture`. Commit only this unit here; a fix a lower part needs goes on that part's branch, then `gh stack rebase`.
-- **Start:** `gh stack init` with the branches above, in order, when the stack does not exist yet (it adopts the existing plans branch); otherwise `gh stack checkout` this branch.
-- **Publish and merge:** `gh stack submit` opens one pull request per layer; `gh stack merge` merges bottom up.
+- **Stack, bottom to top:** `docs/agents-skeleton-plan` → `feat/agents-u1-isolation-gate` → `feat/agents-u2-boundaries` → `feat/agents-u3-tone-agent` → `feat/agents-u4-session-piece` → `feat/agents-u9-agent-worker` → `feat/agents-u8-isolation-probe` → `feat/agents-u5-operations` → `feat/agents-u6-dir-summary` → `feat/agents-u7-dir-review`.
+- **This part:** branch `feat/agents-u2-boundaries`, on top of `feat/agents-u1-isolation-gate`, pull request #34, reworked. Commit only this unit here; a fix a lower part needs goes on that part's branch, then `gh stack rebase`.
+- **Start:** `gh stack checkout` this branch when it exists, or `gh stack add` it on top of the part below.
+- **Publish and merge:** `gh stack submit` opens or updates one pull request per layer; `gh stack merge` merges bottom up.

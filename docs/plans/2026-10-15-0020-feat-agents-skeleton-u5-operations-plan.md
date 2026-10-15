@@ -1,5 +1,5 @@
 ---
-title: Agents Skeleton U5 Agent Operations - Plan
+title: Agents Skeleton U5 Credential Proxy, Operations Doc and Tone Proof - Plan
 type: feat
 date: 2026-10-15
 topic: agents-skeleton-u5-operations
@@ -9,34 +9,37 @@ origin: docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md
 execution: code
 ---
 
-# Agents Skeleton U5 Agent Operations - Plan
+# Agents Skeleton U5 Credential Proxy, Operations Doc and Tone Proof - Plan
 
 ## Goal Capsule
 
-- **Objective:** An operator can switch agents on for the compose stack from one document, and `tone` is proven once against real Haiku on that topology.
-- **Parent:** `docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md` holds the whole plan; this is part 5 of 7. This file is meant to be enough: open the parent only when something you need is missing here.
-- **Depends on:** U4. **Blocks:** none; U6 sits above it in the stack.
-- **Stop conditions:** stop and ask when the bundled `claude` CLI fails under KTD6's read-only root and `noexec` tmpfs in the manual proof, and `CLAUDE_CODE_TMPDIR` on an exec-allowed tmpfs does not fix it; or when CI's 90% coverage floor cannot be held without excluding code.
+- **Objective:** An operator runs agents from `compose.yaml` and one document. The credential sits only in the proxy, and `tone` is proven once against real Haiku.
+- **Parent:** `docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md` holds the whole plan; this is part 7 of 9 in stack order (unit U5). This file is meant to be enough: open the parent only when something you need is missing here. When the two differ, the parent wins.
+- **Depends on:** U8; it sits on `feat/agents-u8-isolation-probe` in the stack. **Blocks:** U6 builds on this part directly; U7 through it.
+- **Stop conditions:** stop and ask when Caddy 2.11.7 cannot express KTD22's rules without expanding a request-derived value, or when a stream longer than 60 seconds does not reach the client whole.
 
 ## Builds on
 
-Already in the stack below; read the code, not those plans.
+Read the code on the branches named here, not the plans that produced it.
 
-- U4: the container piece, the `tone` task and the worker's preparation, with the `CORVO_AGENT_*` settings it reads.
+- U8: the isolation probe and `scripted-api`, which become the proxy's upstream in tests.
+- U9: the `agent-worker` service and the `agents` network.
+- On `main`: `compose.yaml`'s and `.env.example`'s comment style, and `README.md`.
 
 ## Product Contract
 
 ### Summary
 
-Adds `compose.agents.yaml`, `docs/agents.md` (provisioning, credentials, nftables rule, manual proof runbook) and the agent variables in `.env.example`, then proves `tone` on real Haiku.
+Adds the Caddy credential proxy as `claude-proxy`, puts it between the agent worker and the Claude API, re-runs the isolation probe through it, writes `docs/agents.md`, the repository's first operations doc, and records `tone`'s Haiku proof.
 
 ### Context
 
-The skeleton is only usable once a host can be provisioned for it. R14's shared-group socket and the root-worker permissions exist only on this topology, so this part's proof is their only check. R25 is completed for `tone` here.
+R12 and R16 keep the Claude credential out of the agent worker. Until this part, the stack's sessions talk to the scripted API directly. R25 is completed for `tone` here; U6 and U7 record their own proofs.
 
 ### Key Decisions
 
-- **Rootless Podman under a dedicated host user, with its socket mounted into the worker's container.** The worker stays a compose service. (session-settled: user-directed — chosen over the host's `docker.sock` (a compromised worker is host root), the worker running on the host, Docker-in-Docker and a hosted sandbox.) (session-settled: user-approved — Podman chosen over rootless Docker: it runs beside the compose stack's rootful Docker on its documented path, GitLab Runner documents the same setup, and the CI runner ships it.) Governs R14.
+- **The agent worker is a compose service of its own.** (session-settled: user-approved — chosen over a systemd service on the host: it keeps one deploy path and the Hatchet engine's gRPC internal, at the cost of R27's container settings and a profile kept in step with Docker's.) Governs R13, R27.
+- **The Claude credential lives in a proxy and the agent worker's egress is cut, from the first run.** Without both, a session that reads its own engine's credential could send it out. (session-settled: user-approved — chosen over deferring the proxy and `--network none`, as the Podman design did.) Governs R12, R16.
 - **The Claude credential is either an API key or a subscription OAuth token, chosen per environment.** (session-settled: user-directed — chosen over an API key only and over a subscription token only.) Governs R12.
 - **No automated test calls Claude; a manual run on Haiku proves each example.** (session-settled: user-directed — chosen over an e2e job against real Claude on every push to main, and over an on-demand e2e job.) Governs R22, R25.
 
@@ -44,141 +47,182 @@ The skeleton is only usable once a host can be provisioned for it. R14's shared-
 
 **Agent execution**
 
-- R12. The Claude credential comes from corvo's settings, as an API key or a subscription OAuth token, and each environment chooses which.
+- R12. The Claude credential is set in the deployment's environment, as an API key or a subscription OAuth token, and each environment chooses which. Only the proxy of R16 receives it; corvo's settings hold only which kind it is.
 
 **Isolation**
 
-- R14. Agent containers run on a rootless Podman under a dedicated host user, apart from the daemon that runs the compose stack. The worker stays a compose service and reaches Podman through that user's API socket, mounted into the worker's container and reachable by the worker's user through a shared group. When it starts, the worker checks that the host's cgroup controllers for memory, CPU and processes are available, and refuses agent runs when they are not.
-- R16. When Hatchet times out or cancels an agent task, the task kills and removes its container. Every container carries labels with its run's ID and its Hatchet deployment (server and tenant). A worker that starts removes only containers of its own deployment whose run Hatchet reports as finished, failed or cancelled.
+- R13. Agent tasks run only on a dedicated agent worker, which holds the Hatchet token but neither the database password nor the Claude credential.
+- R16. A proxy outside the agent worker holds the Claude credential, puts it in place of the placeholder each session sends, and forwards only to the Claude API. The agent worker's network reaches only the proxy and the Hatchet engine.
+- R27. The agent worker's container keeps a syscall filter: Docker's default profile plus only the calls bubblewrap needs. The profile is generated from the upstream one, and a CI check fails when the generated and the committed profiles differ.
 
 **Tests**
 
 - R25. Each example is proven once against real Claude Haiku with a small prompt, through a documented manual command whose run is recorded in the pull request.
+- R31. An automated test runs the real SDK engine in the real sandbox against a scripted Messages API that makes a session try each escape of AE5, and fails when any succeeds.
+
+### Acceptance Examples
+
+- AE5. **Covers R13, R14, R15, R16, R26, R31.** **Given** a session whose shell command follows a prompt injection, **when** it tries to read the Hatchet token or the Claude credential from any process, write a result into its engine's output, list another run's or the host's files, or reach the internet, **then** every attempt fails and the task returns only the session's real output.
 
 ### Scope Boundaries
 
-- No code change beyond configuration and documentation.
+Not in this part:
+
+- No run-scoped proxy authentication and no per-run spend ceiling: the Console workspace's spend limit bounds spend (KTD18).
+- No credential rotation flow beyond what `docs/agents.md` states.
+
+The parent's Scope Boundaries hold for every part.
 
 ### Dependencies / Assumptions
 
+- Measured on 2026-10-15 with the bundled engine against a local stand-in for the Messages API that scripted Bash and Read calls (Arch, kernel 7.2, bubblewrap 0.12.0, Docker 29.7.2):
+  - Without a sandbox, and with the outer bubblewrap alone, a shell command forged a `ResultMessage` that the SDK yielded before the real one. With the SDK's sandbox alone, the command still read the Hatchet token and the Claude credential in its environment and listed other checkouts. With both layers and the scrub, every attempt failed.
+  - The scrub forces `permission_mode` from `dontAsk` to `default`; with explicit `allowed_tools`, every other call was still denied. On the development host, the scrub's own bubblewrap fails outside an outer sandbox because `/run/containerd` exists but is unreadable, and it then runs nothing.
+  - The Read tool refuses `/proc/*/environ` as a device file. That is an engine check, not an OS boundary.
+  - The engine refuses to run with no credential. With a placeholder it sends `x-api-key: <placeholder>` for an API key, or `Authorization: Bearer <placeholder>` with `anthropic-beta: oauth-2025-04-20` for an OAuth token, to `ANTHROPIC_BASE_URL` alone, with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
+  - Docker's default seccomp profile refuses the user namespaces bubblewrap needs. That profile plus `clone`, `unshare`, `mount`, `umount2`, `pivot_root` and `setns` lets bubblewrap start, while `keyctl`, `add_key`, `request_key`, `perf_event_open`, `kexec_load` and `open_by_handle_at` stay refused.
+  - A fresh `/proc` also needs Docker's `/proc` masks lifted (`systempaths=unconfined`). uid 1000 then still cannot read `/proc/kcore` or `/proc/timer_list` and gains no write.
+  - With `writable-cgroups=true`, a root entrypoint delegated a cgroup subtree to uid 1000 and dropped root. A session in a child cgroup stopped at its process limit and was killed at its memory limit, while the worker's cgroup was untouched.
 - The subscription OAuth token is, by Anthropic's terms, for ordinary individual use by the subscriber. Products and services built on the Agent SDK must use API keys (`legal-and-compliance.md`; Agent SDK `overview.md`). A `claude setup-token` token lasts one year.
-- The default rootless network relays traffic through sockets the dedicated user opens on the host. The container therefore reaches the LAN, the cloud metadata endpoint and the compose stack's bridge addresses, not only the internet (passt and Podman network docs).
 
 ## Planning Contract
 
 ### Key Technical Decisions
 
-- KTD10. **Before the worker starts serving, `main()` prepares agents in at most 45 seconds, and a failure only disables them.** When agents are configured (KTD12), it runs, in order:
-  1. Check that the image is present.
-  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec, with no credential, no working directory and a scratch run directory. It writes a report into that directory:
-     - the fingerprint;
-     - `memory.max`, `cpu.max` and `pids.max` read inside the container;
-     - the effective capabilities;
-     - the environment variable names;
-     - whether the root filesystem is read-only;
-     - the flags of the `/tmp` and `/home/agent` mounts, read from `/proc/self/mounts`;
-     - whether a one-second TCP connect reaches the container's default gateway and `169.254.169.254:80`.
-  3. Compare the report with the spec and with the worker's own fingerprint. The probe step then force-removes its container by label, whatever the outcome.
-  4. Sweep (KTD11).
+Copied from the parent; a KTD cited here but not copied is in the parent.
 
-  - **When a check fails.** A limit, a flag or a fingerprint that differs, or any error, disables agents, with the reason logged. Every other task keeps working.
-  - **When egress is open.** A reachable gateway or metadata address means KTD16's nftables rule is missing. With `agent_require_egress_block` set (KTD12), it disables agents. Otherwise it logs a warning, which is the default for development and CI, which have no such rule.
-  - **Recovery.** Agents stay disabled until the worker restarts. Agent runs fail at once with the logged reason, which is how the operator learns of it.
-  - **The fingerprint.** It is a SHA-256 over the `*.py` files and `prompts/**` under `corvo/agents/` and `corvo/core/agents/`, sorted by relative path, with `__pycache__` and `*.pyc` excluded, plus the installed `claude-agent-sdk` version. `corvo.agents.fingerprint` computes it from the standard library alone, and each side computes it over its own installed copy. A stale agent image is therefore refused instead of running old code. The report comes from the image under test, so the fingerprint detects a stale image, not a tampered one (Risks).
-  - **The cgroup check.** The probe is also R14's cgroup check: on cgroup v2, an undelegated controller makes the container fail to start.
-
-  Governs R14, R15, R16.
-- KTD11. **The sweep removes containers of this deployment whose run has ended.**
-  - The deployment label is `<tenant_id>@<server_url>`, taken from `hatchet.config` once at start.
-  - It lists containers by the positive filters `label=corvo.managed=true` and `label=corvo.deployment=<id>`. Podman 6 changed negative label filters.
-  - It reads each run's status once, bounded to 5 seconds, through the REST client under `hatchet.runs`. It bypasses the SDK's `get_status` wrapper, whose tenacity policy retries a 404 five times, about 15 seconds per container.
-  - It removes a container only on `COMPLETED`, `FAILED` or `CANCELLED` (R16).
-  - It keeps a container whose run is not found or whose lookup timed out, and logs it as a warning for the operator. A 404 does not prove the run ended: it can come from Hatchet's read model, which fills asynchronously, or from another stack on the same quickstart tenant.
-  - The sweep's total is bounded to 20 seconds, inside KTD10's budget.
-  - Probe containers are not the sweep's: the probe step force-removes its own container by label when it ends (KTD10).
-  - The REST call needs the dashboard's address. The compose overlay sets `HATCHET_CLIENT_SERVER_URL` for the worker, because the token's `localhost:8080` points at the worker itself inside its container.
-
-  Governs R16.
-- KTD12. **Agent settings are five `CORVO_AGENT_*` fields plus the credential, and an empty socket or root means "agents not configured".**
-  - The fields are `agent_podman_socket`, `agent_root`, `agent_image` (default `localhost/corvo-agent:latest`), `agent_credential_kind: Literal["api_key", "oauth_token"]` and `agent_require_egress_block: bool = False` (KTD10), plus `agent_credential`.
-  - They are plain `str`, as `settings.py` holds its other secrets.
-  - With the socket or the root empty, an agent task fails at once with "agents are not configured", and `main()` skips KTD10.
-  - An empty credential while the rest is configured disables agents in KTD10.
-  - The container receives the credential as `ANTHROPIC_API_KEY` or as `CLAUDE_CODE_OAUTH_TOKEN`, never both.
+- KTD12. **Agent settings are `CORVO_AGENT_*` fields for the root, the kind, the proxy, the cgroup root and the engine.**
+  - Removed: `agent_podman_socket`, `agent_image`, `agent_require_egress_block` and `agent_credential`. The credential moves to the proxy's environment (R12).
+  - Kept: `agent_root` and `agent_credential_kind: Literal["api_key", "oauth_token"]`.
+  - Added: `agent_proxy_url` (the sessions' `ANTHROPIC_BASE_URL`), `agent_cgroup_root` (default `/sys/fs/cgroup/agents`) and `agent_engine`, the engine's path. The `agent-worker` image sets it to the engine KTD13 moved; the integration overlay points it at the fake CLI, and KTD10 logs it at start.
+  - Each session gets a fixed placeholder as `ANTHROPIC_API_KEY` for `api_key`, or as `CLAUDE_CODE_OAUTH_TOKEN` for `oauth_token`, never both. The engine then sends `x-api-key` or `Authorization: Bearer`, which the proxy replaces (KTD22).
   - The settings comment and `docs/agents.md` carry the OAuth terms (Dependencies).
 
-  Governs R12, R14.
-- KTD16. **Agent containers keep the default rootless network.** This instantiates the Key Decision on egress and inherits its label. (session-settled: user-approved — chosen over building the credential proxy now.) Conflict call-out: research found that the default network reaches more than the internet. It reaches the LAN, the cloud metadata endpoint and the compose stack's bridge addresses, through sockets the dedicated user opens on the host. Postgres and Hatchet still need credentials the container does not hold. The decision stands for these examples. `docs/agents.md` adds an owner-matched nftables rule as a production provisioning step: it drops the dedicated user's traffic to private, link-local and loopback ranges, with DNS allowed first. Every manual proof records what the container reached. Governs R15.
-- KTD18. **Operating agents is opt-in through `compose.agents.yaml`, documented in `docs/agents.md`.**
-  - **The overlay.** It changes the worker service:
-    - It mounts the socket and `CORVO_AGENT_ROOT` at their host paths.
-    - It adds the `corvo-agents` GID through `group_add`.
-    - It drops the capabilities the worker does not need, at least `MKNOD`, `SETUID`, `SETGID` and `FOWNER`.
-    - It sets the `CORVO_AGENT_*` variables, with `CORVO_AGENT_REQUIRE_EGRESS_BLOCK=true`, and `HATCHET_CLIENT_SERVER_URL`.
+  Governs R12, R13.
+- KTD18. **Agents come with the stack: `compose.yaml` runs the agent worker and the proxy, and `docs/agents.md` is the repository's first operations doc.**
+  - Compose services:
+    - `agent-worker`: the `agent-worker` stage with `CORVO_WORKER_PROFILE=agents` (KTD26), KTD23's security options, `init: true`, the agent root volume, the Hatchet token and no database variable;
+    - `claude-proxy`: the credential and its kind, required with `:?`;
+    - an internal `agents` network (KTD24).
+  - `docs/agents.md` covers, in order:
+    - what agents need from the host: cgroup v2, a Docker at or past the profile's tag, and on Ubuntu the AppArmor settings U1 found;
+    - credentials and their terms: an API key from a Console workspace with a spend limit, and for an OAuth token the data terms that apply to the code it sends;
+    - that a session's output and run log carry repository content by design, so a workflow that publishes them treats them as confidential;
+    - keeping the host kernel patched, since sessions may create user namespaces;
+    - the first deployment, when the engine has never seen an agent task registered (U9 checks how a run triggered then behaves);
+    - sizing, at cap + 1 sessions of `AGENT_MEMORY` plus the worker;
+    - what each refusal reason means and its fix;
+    - how an OOM or a dead proxy shows in the run log;
+    - the re-run rule and its recovery (KTD8);
+    - the working-directory rules (KTD7);
+    - refreshing the seccomp profile (KTD23);
+    - the manual Haiku proof runbook and its evidence: cost, turns, session ID, peak processes, and what the session reached.
 
-    Without the overlay, the stack runs as today, and agent tasks fail fast (KTD12).
-  - **Provisioning.** The doc covers:
-    - installing Podman;
-    - the dedicated user, with subordinate IDs and lingering, kept out of the `docker` group and sudoers. Its login configuration, its systemd-user configuration and its `containers` configuration (`~/.config/containers`, including `containers.conf`, `storage.conf` and `registries.conf`) are root-owned and not writable by it. It writes only its container storage;
-    - a `podman.socket` drop-in that moves `ListenStream=` to `/run/corvo-agents/podman.sock` with `SocketGroup=corvo-agents` and `SocketMode=0660`, plus the `tmpfiles.d` entry for its directory;
-    - the agent root, setgid with a default ACL for the group. In production it sits on its own filesystem or quota, mounted `nodev,nosuid`;
-    - building the agent image as that user on every deploy, and recording its image ID. KTD10 refuses stale images, and a changed ID between deploys is then visible;
-    - KTD16's nftables rule;
-    - the credential terms and the OAuth token's one-year expiry.
-  - **The manual proof runbook.** It triggers an example on the compose topology with real Haiku, and records in the pull request:
-    - cost, turns and session ID;
-    - peak process count;
-    - that `/tmp` with `noexec` did not break the CLI;
-    - that the worker read the envelope across the root/rootless boundary;
-    - the agent root's mount flags and the worker's dropped capabilities;
-    - what the container could reach.
+  Governs R12, R13, R16, R25, R27.
+- KTD22. **Caddy 2.11.7 holds the Claude credential, as the `claude-proxy` service.**
+  - It runs from the official `caddy:2.11.7-alpine` image with `deploy/claude-proxy/Caddyfile`, and its admin API is off.
+  - It accepts only `POST /v1/messages` and `POST /v1/messages/count_tokens`, with their query, and answers 404 to anything else, `HEAD /api/hello` included.
+  - It removes the incoming `x-api-key` and `Authorization`, and sets `CORVO_AGENT_CREDENTIAL` in the header `CORVO_AGENT_CREDENTIAL_KIND` names: `x-api-key`, or `Authorization: Bearer`. Every `anthropic-*` header and the body pass unchanged, including the OAuth beta value without which the API answers 401.
+  - It refuses an `anthropic-beta` value naming `mcp-client` or `web-fetch`, which would let a request make the API itself fetch from an address the request names, and it caps the request body at 32 MiB. Web search needs no beta header, so `docs/agents.md` requires web search and web fetch turned off in the API key's Console organization. It also states that an `oauth_token` deployment cannot turn them off.
+  - The upstream is `CORVO_AGENT_UPSTREAM`, `https://api.anthropic.com` by default, with `Host` set to it. Responses stream as they arrive, with no total timeout and idle limits above the engine's 300-second watchdogs. Its log never holds headers or bodies.
+  - The Caddyfile expands no value that comes from a request, only `{env.…}` of its own configuration, which keeps GHSA-wwhq-w58m-w29c's class of leak out.
+  - It is pinned at 2.11.7 or later, because 2.11.6 cut streams opened by a `POST` 60 seconds after the request body was read.
+  - Apache-2.0, read at the source.
+  - (session-settled: user-directed — chosen over a corvo-owned Python proxy and Envoy: no corvo code sits on the credential's path, and Caddy's streaming is mature.)
 
-    `dir-summary`'s proof also carries AE6 and tool denial: its working directory holds a CLAUDE.md, a `.claude/skills/` entry and a prompt that asks for a tool outside the list and for a read of `/proc/self/environ`. A fake CLI cannot prove those.
+  Governs R12, R16.
+- KTD23. **The agent worker's seccomp profile is generated from Docker's, vendored at a pinned tag, and checked in CI.**
+  - `deploy/agent-worker/seccomp-moby-default.json` is moby's `vendor/github.com/moby/profiles/seccomp/default.json` at `docker-v29.7.2`. `deploy/agent-worker/seccomp.py` adds `clone`, `unshare`, `mount`, `umount2`, `pivot_root` and `setns` to its allow rule, and writes `deploy/agent-worker/seccomp.json`.
+  - It also denies `socket(AF_NETLINK, …, NETLINK_NETFILTER)`. Allowing user namespaces opens nf_tables to every command, the kernel area most unprivileged-namespace exploits have used, such as CVE-2024-1086. bubblewrap needs only `NETLINK_ROUTE`, and U1 confirms the SDK's sandbox needs nothing more. This is narrower than R27's floor, never wider.
+  - `tests/test_seccomp_profile.py` regenerates the profile in memory and fails on any difference from the committed one. It also fails when `keyctl`, `add_key`, `request_key`, `perf_event_open`, `kexec_load` or `open_by_handle_at` become allowed, or when the netfilter rule is gone.
+  - Compose sets `seccomp=deploy/agent-worker/seccomp.json`, `systempaths=unconfined` and `writable-cgroups=true` on `agent-worker` only. Refreshing the vendored copy when the host's Docker moves to a new major is a step in `docs/agents.md`.
 
-  Governs R14, R16, R25.
+  Governs R27.
+- KTD24. **The `agents` compose network is internal, and only the proxy also reaches the outside.**
+  - Its members are `agent-worker`, `claude-proxy` and `hatchet-engine`, and `scripted-api` in tests. `claude-proxy` also joins the default network for its upstream.
+  - The engine shares the agent worker's network namespace (`--share-net`). It reaches those services, and on loopback the worker's healthcheck and other runs' sandbox proxies. (session-settled: user-directed — chosen over a network namespace of the engine's own: none of that reach gives an engine anything usable, which U8 asserts, and the separate namespace is follow-up work in #38.) Shell commands get their own namespace from the SDK's sandbox, with an empty allowlist (R15).
+  - The engine also calls `api.anthropic.com` directly for its fast-mode check, and its other hosts are off by KTD20's flags. With no route out, those calls fail; U1's gate asserts they fail fast and never stall a session.
+  - The engine's own reach is measured, not assumed: U8's engine-layer probe records it (KTD25).
+
+  Governs R15, R16.
+- KTD25. **R31's probe runs the real engine on a test-only agent worker built from the same image and settings, against a scripted Messages API, through Hatchet.**
+  - The overlay's service `agent-probe` runs the `agent-worker` image with the same entrypoint, security options, network, Hatchet token and healthcheck. Its command starts `tests/agents/probe/worker.py`, which calls `serve` with the `agents` profile's hooks and slots and one test-only task, `agent-probe`, whose agent has `Bash`, `Read` and `Grep`. The task stays off every profile. The test triggers it by name, so the task layer and the worker's healthcheck listener are both present.
+  - `tests/agents/scripted_api.py`, grown from the Messages API stand-in measured on 2026-10-15, scripts the turns:
+    - a Bash call running `tests/agents/probe/probe.sh`;
+    - Read and Grep calls on `/proc/self/environ`, `/proc/1/environ`, a working-directory symlink to `/proc/1/environ`, and a path outside the working directory.
+  - **The shell layer.** The Bash probe tries every escape of AE5:
+    - reading the Hatchet token or a credential from any process's environment;
+    - writing a forged result into the engine's output;
+    - listing another run's or the host's files;
+    - reaching the internet;
+    - mounting cgroup2 in a new namespace, writing its own limits, or writing another run's `cgroup.kill`;
+    - finding `/sys`;
+    - opening a netfilter socket in a nested namespace;
+    - writing the engine's home, its `CLAUDE_CONFIG_DIR` or its `/tmp`, so that the engine would later run what it wrote. The probe asserts nothing it wrote ran.
+  - **The engine layer.** A second probe runs `probe.sh` straight through the wrapper, without the SDK's sandbox, to measure what an escape into the engine would reach. It expects no token and no writable cgroup file. Because the engine shares the agent worker's network (KTD24), it expects to reach the proxy, the Hatchet engine's gRPC, the worker's healthcheck and other runs' SDK-sandbox proxies on loopback, and nothing else. It asserts that each of those gives nothing usable: the healthcheck serves only health and metrics, another run's sandbox proxy forwards nowhere under the empty allowlist, and the gRPC refuses calls without the token. Any other reach is a failure.
+  - Two runs execute at once, so each probe has another run to try.
+  - The test fails when any attempt succeeds, or when a session's result differs from the scripted one. U5 runs it again with `claude-proxy` in the path, adding attempts on its other paths and its admin API.
+
+  Governs R31; AE5.
+
+### Risks
+
+- **Caddy regressions on streaming.** 2.11.6 broke exactly the engine's request shape. A stream longer than 60 seconds in `test_proxy.py` guards every bump.
+
+### Deferred to Implementation
+
+- How the Caddyfile picks the header from `CORVO_AGENT_CREDENTIAL_KIND`: an environment-chosen snippet or two matchers. Both kinds are tested either way.
 
 ## Implementation Units
 
-### U5. Operations: compose overlay, provisioning doc and the `tone` proof
+### U5. Operations: the credential proxy, the operations doc and the `tone` proof
 
-- **Goal:** an operator can switch agents on for the compose stack from one document, and `tone` is proven once against real Haiku on that topology.
-- **Requirements:** R12, R14, R16, R25; KTD11, KTD12, KTD16, KTD18.
-- **Dependencies:** U4.
+- **Goal:** an operator runs agents from `compose.yaml` and one document. The credential sits only in the proxy, and `tone` is proven once against real Haiku.
+- **Requirements:** R12, R13, R16, R25, R27, R31; KTD18, KTD22, KTD23, KTD24, KTD25.
+- **Dependencies:** U8.
 - **Files:**
-  - Create `compose.agents.yaml` and `docs/agents.md`.
-  - Modify `.env.example`.
-  - Modify `README.md` (one line pointing at `docs/agents.md`).
+  - Create `deploy/claude-proxy/Caddyfile`.
+  - Modify `compose.yaml` (`claude-proxy`, its networks, the agent worker's proxy address) and `.env.example` (the credential and its kind).
+  - Modify `tests/integration/worker/compose.yaml` (the proxy's upstream on `scripted-api`, `agent-probe` through the proxy) and `tests/integration/worker/conftest.py` (`write_env_file`'s dummy credential).
+  - Create `tests/integration/worker/test_proxy.py`, and modify `tests/agents/probe/probe.sh` (the attempts on the proxy).
+  - Create `docs/agents.md`; modify `README.md` (one line pointing at the doc).
 - **Approach:**
-  1. The overlay per KTD18, with a header comment in `compose.yaml`'s style. A `stop_grace_period` of 30 seconds lets the worker's graceful exit finish short work.
-  2. `docs/agents.md`, in this order:
-     - what agents need;
-     - provisioning, step by step;
-     - switching on the overlay;
-     - rebuilding the agent image on every deploy;
-     - the nftables rule;
-     - credentials and their terms;
-     - the manual proof runbook (KTD18);
-     - when to repeat a proof (Risks).
-  3. `.env.example` gains each `CORVO_AGENT_*` variable and the numeric `CORVO_AGENTS_GID` for `group_add`, each under a comment.
-- **Execution note:** this is configuration and documentation. Prove it with the runbook on a provisioned machine, not with new unit tests.
-- **Patterns to follow:** `compose.yaml` and `.env.example` comment style; the GitLab Runner rootless Podman setup for the provisioning steps.
-- **Test scenarios:** Test expectation: none -- configuration and documentation. The proof is the manual Haiku run recorded in the PR.
-- **Verification:** `docker compose -f compose.yaml -f compose.agents.yaml config` validates. Following `docs/agents.md` on Arch produces a worker that logs agents as enabled. The PR records `tone`'s Haiku run with KTD18's evidence.
+  1. The Caddyfile per KTD22, with a header comment in `compose.yaml`'s style.
+  2. In the stack, the agent worker's and the probe's proxy address move from `scripted-api` to `claude-proxy`.
+  3. The probe gains attempts on the proxy's other paths and its admin API.
+  4. `docs/agents.md` in KTD18's order.
+- **Execution note:** the proxy's behavior is proven by integration against the scripted upstream; the doc is proven by following it with the Haiku runbook.
+- **Patterns to follow:** `compose.yaml`'s and `.env.example`'s comment style.
+- **Test scenarios:**
+  - With kind `api_key`, a request carrying the placeholder in `x-api-key` reaches the upstream with the dummy credential in `x-api-key` and no `Authorization`.
+  - With kind `oauth_token`, a request carrying `Authorization: Bearer <placeholder>` and the OAuth beta value reaches the upstream with `Authorization: Bearer <dummy>` and the beta value unchanged.
+  - `GET /v1/models`, `HEAD /api/hello` and `POST /v1/files` get 404 and never reach the upstream.
+  - A request whose `anthropic-beta` names `mcp-client` or `web-fetch` is refused, and so is a body over 32 MiB.
+  - A request header holding `{env.CORVO_AGENT_CREDENTIAL}` reaches the upstream unexpanded.
+  - An upstream SSE stream that pauses between events and lasts more than 60 seconds after the request body reaches the client whole, event by event.
+  - Integration: `tone` through `claude-proxy` returns the fake's verdict, and the scripted upstream saw only the dummy credential.
+  - Covers AE5. Integration: the isolation probe, through `claude-proxy`, still has every shell-layer attempt `blocked`, and its attempts on the proxy's other paths and admin API fail.
+- **Verification:** the suites pass. `docker compose config` validates. Following `docs/agents.md` on Arch gives an agent worker that logs its checks as passed. The pull request records `tone`'s Haiku run with KTD18's evidence.
 
 ## Verification Contract
 
-- `uv run prek run --all-files`: ruff, format, mypy strict with `types-docker`, lockfile.
-- The manual Haiku proof in `docs/agents.md`, recorded in the PR.
+- `uv run prek run --all-files`.
+- `uv run pytest tests/integration/worker`: integration on compose, `test_proxy.py` included.
+- `docker compose config` validates.
+- Manual: the Haiku runbook in `docs/agents.md`, once for `tone`.
+- CI: `tnmn.io: python` on the pull request.
 
 ## Definition of Done
 
-- Every gate above passes locally and in CI.
-- U5 when a worker provisioned from `docs/agents.md` logs agents as enabled, and the PR records `tone`'s Haiku run with KTD18's evidence.
-- No abandoned attempt remains in the diff.
+- Every gate above passes locally, and CI passes on the pull request.
+- The proxy's tests pass, and the isolation probe passes through it.
+- Following `docs/agents.md` on Arch gives an agent worker that logs its checks as passed.
+- The pull request records `tone`'s Haiku run with KTD18's evidence.
+- No abandoned attempt remains in the diff: no unused helpers, no commented-out code, no leftover tests.
 
 ## Execution: gh stack
 
-- **Stack, bottom to top:** `docs/agents-skeleton-plan` → `feat/agents-u1-podman-fixture` → `feat/agents-u2-boundaries` → `feat/agents-u3-tone-agent` → `feat/agents-u4-container-piece` → `feat/agents-u5-operations` → `feat/agents-u6-dir-summary` → `feat/agents-u7-dir-review`.
-- **This part:** branch `feat/agents-u5-operations`, on top of `feat/agents-u4-container-piece`. Commit only this unit here; a fix a lower part needs goes on that part's branch, then `gh stack rebase`.
-- **Start:** `gh stack init` with the branches above, in order, when the stack does not exist yet (it adopts the existing plans branch); otherwise `gh stack checkout` this branch.
-- **Publish and merge:** `gh stack submit` opens one pull request per layer; `gh stack merge` merges bottom up.
+- **Stack, bottom to top:** `docs/agents-skeleton-plan` → `feat/agents-u1-isolation-gate` → `feat/agents-u2-boundaries` → `feat/agents-u3-tone-agent` → `feat/agents-u4-session-piece` → `feat/agents-u9-agent-worker` → `feat/agents-u8-isolation-probe` → `feat/agents-u5-operations` → `feat/agents-u6-dir-summary` → `feat/agents-u7-dir-review`.
+- **This part:** branch `feat/agents-u5-operations`, on top of `feat/agents-u8-isolation-probe`, pull request new. Commit only this unit here; a fix a lower part needs goes on that part's branch, then `gh stack rebase`.
+- **Start:** `gh stack checkout` this branch when it exists, or `gh stack add` it on top of the part below.
+- **Publish and merge:** `gh stack submit` opens or updates one pull request per layer; `gh stack merge` merges bottom up.

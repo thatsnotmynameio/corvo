@@ -1,5 +1,5 @@
 ---
-title: Agents Skeleton U7 Dir Review Workflow - Plan
+title: Agents Skeleton U7 Dir-Review Workflow - Plan
 type: feat
 date: 2026-10-15
 topic: agents-skeleton-u7-dir-review
@@ -9,32 +9,32 @@ origin: docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md
 execution: code
 ---
 
-# Agents Skeleton U7 Dir Review Workflow - Plan
+# Agents Skeleton U7 Dir-Review Workflow - Plan
 
 ## Goal Capsule
 
-- **Objective:** A contributor can copy a workflow whose steps spawn agents as child runs and combine their outputs.
-- **Parent:** `docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md` holds the whole plan; this is part 7 of 7. This file is meant to be enough: open the parent only when something you need is missing here.
-- **Depends on:** U6. **Blocks:** none; this is the top of the stack.
-- **Stop conditions:** stop and ask when the SDK, Hatchet or Podman behaves differently from this plan on the pinned versions, or when CI's 90% coverage floor cannot be held without excluding code.
+- **Objective:** A contributor can copy a workflow whose steps spawn agents as child runs and combine their outputs, from the main worker.
+- **Parent:** `docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md` holds the whole plan; this is part 9 of 9 in stack order (unit U7). This file is meant to be enough: open the parent only when something you need is missing here. When the two differ, the parent wins.
+- **Depends on:** U6; it sits on `feat/agents-u6-dir-summary` in the stack. **Blocks:** none; this is the stack's top.
+- **Stop conditions:** stop and ask when a `hatchet.stubs.task` stub cannot share its task's input and output classes on hatchet-sdk 1.42.1.
 
 ## Builds on
 
-Already in the stack below; read the code, not those plans.
+Read the code on the branches named here, not the plans that produced it.
 
-- U4: the agent defaults, `AGENT_WAITING_EXECUTION_TIMEOUT` included, and the `tone` task.
-- U5: `docs/agents.md` and its manual proof runbook.
-- U6: the `dir-summary` task.
+- U6's `agent_calls` and both agent tasks.
+- U2's registration test, which this part extends with the stubs check.
+- On `main`: `src/corvo/worker/workflows/greeting.py` and its tests.
 
 ## Product Contract
 
 ### Summary
 
-Adds the `dir-review` DAG, whose `summarize` step spawns `dir-summary` and whose `judge` step spawns `tone` on the summary, with its core twin and tests.
+Adds the `dir-review` DAG on the main profile, which spawns both agents through stubs and combines their outputs, its core twin, and the stubs' registration check.
 
 ### Context
 
-This is the example for workflows that hand steps to agents. R20 and AE7 are completed here, with R25's proof for the workflow.
+`dir-review` is the third living example (R20). The main profile reaches agent tasks only through stubs, so the main worker never imports an agent (KTD2, KTD26).
 
 ### Key Decisions
 
@@ -56,109 +56,123 @@ This is the example for workflows that hand steps to agents. R20 and AE7 are com
 
 **Tests**
 
-- R24. The integration suite runs every example on the real Hatchet and a real rootless Podman, with the SDK replaced inside the container, including the kill and removal on timeout. It creates its working directories under the agent-workdir root (R5), not in pytest's temporary directories.
+- R24. The integration suite runs every example on the real Hatchet and real bubblewrap with the SDK's engine replaced, including the end of a run on timeout. It creates its working directories below `<root>/workdirs` (R5), not in pytest's temporary directories.
 - R25. Each example is proven once against real Claude Haiku with a small prompt, through a documented manual command whose run is recorded in the pull request.
 
 ### Acceptance Examples
 
-- AE7. **Covers R20, R24.** **Given** the workflow example on Hatchet and Podman with the SDK replaced, **when** it runs, **then** it returns outputs derived from both agents' structured outputs.
+- AE7. **Covers R20, R24.** **Given** the workflow example on Hatchet and bubblewrap with the SDK's engine replaced, **when** it runs, **then** it returns outputs derived from both agents' structured outputs.
 
 ### Scope Boundaries
 
-- No new agent.
+Not in this part:
+
+- No agent that calls Hatchet tasks as tools (the plan's Scope Boundaries).
+
+The parent's Scope Boundaries hold for every part.
+
+### Dependencies / Assumptions
+
+- hatchet-sdk 1.42.1 cancels a running async task's asyncio task on cancellation and timeout (`hatchet_sdk/worker/runner/runner.py:920-944`). It sets the context's cancellation flag, sleeps one second, cancels the task, and frees the task's slot without waiting for its `finally`. Engine timeout and cancel reach the worker as the same `CANCEL_STEP_RUN` action. The SDK also has an unpinned `claude` extra and `mcp_tool` (`hatchet_sdk/runnables/workflow.py:831`), neither used here.
+- Hatchet API tokens are scoped per tenant, with no per-worker or narrower token (Hatchet security docs). A task goes only to workers that registered it, and worker labels attract tasks without keeping others away (Hatchet worker and worker-affinity docs). In hatchet-sdk 1.42.1, `DesiredWorkerLabel.required` defaults to `False` (`hatchet_sdk/types/labels.py:69`), so isolation by registration is the only exclusion this plan relies on.
 
 ## Planning Contract
 
 ### Key Technical Decisions
 
-- KTD1. **An agent package exposes one coroutine, `run`, in `agent.py`, and keeps everything the worker reads in `models.py`.**
-  - `run` takes the agent's input model and its working directory (`None` for an agent without one). It returns its output model together with a `RunReport`: the subtype, turns, cost and session ID.
-  - A failed session raises `AgentRunFailed`, which carries the same report. Both types live in `corvo.agents.envelope`, which imports only Pydantic.
-  - Inside, `run` builds `ClaudeAgentOptions` and calls `query()` itself, with the SDK's own names (R4). It hands the iterator `query()` returned to `corvo.agents.session.consume`, which applies KTD4's result rule and returns the structured output and the report, or raises. The helper consumes the SDK's stream, and does not wrap or replace any of its calls.
-  - `models.py` holds the input model, the model whose JSON Schema becomes `output_format`, the output model, and a `WRITES_WORKDIR` flag. It imports only Pydantic and the standard library.
-  - The worker imports `models.py` and the SDK-free shared modules `envelope` and `fingerprint`, never `agent.py`, `tools.py` or `session.py`.
+Copied from the parent; a KTD cited here but not copied is in the parent.
 
-  The container's entrypoint, `corvo-agent` (`corvo.agents.runner`), imports `corvo.agents.<package>.agent`, validates the request's input with the input model, awaits `run`, and writes the envelope from what `run` returned or raised. The entrypoint sits outside the agent, not between the agent and the SDK. The agent's output model wraps the session's structured output and any field its core twin derives from it (R3). Governs R1, R3, R4, R8, R17.
-- KTD4. **The container hands back a JSON envelope file, and the worker treats it as untrusted.**
-  - **The request.** The worker writes `request.json` into the run directory, holding the agent package, its input, and a session budget in seconds. The budget is `AGENT_EXECUTION_TIMEOUT` minus `AGENT_DEADLINE_MARGIN`, minus the time already passed since the task started. Hatchet's timer starts at assignment, so a deadline equal to the timeout would never fire before Hatchet's own.
-  - **Running the session.** The runner runs `run` under `asyncio.timeout` to that budget. Inside `run`, `corvo.agents.session.consume` keeps the last `ResultMessage` and catches `ResultError` and `ProcessError`. It prints the session ID to stderr when the init message arrives. The run succeeds only when the result is not an error, its subtype is `success`, and its `structured_output` validates.
-  - **The envelope.** The runner writes `result.json` atomically, to a temporary name and then a rename, holding:
-    - a protocol version;
-    - `ok` or `failed`, with the output or the reason (`deadline` when the budget ran out);
-    - the run report: subtype, turns, cost and session ID.
-  - **Reading the envelope.** After the container exits, the worker opens `result.json` non-blocking and without following symlinks, and checks with `fstat` that it is a regular file of at most 1 MiB before any read. A FIFO, a device or a directory named `result.json` can therefore never block a worker thread. The worker never echoes the file's content, and validates it with the envelope model. The probe's report (KTD10) is read the same way.
-  - **Failures.** A failed envelope, a missing or invalid one, or an out-of-memory kill fails the task. The worker logs the cost, turns and session ID from the validated envelope only. When no envelope exists, it logs them as `unknown`, with the exit code and the OOM flag.
-  - **Forwarding stderr.** The worker sends stderr lines to `ctx.log` behind a fixed `agent stderr:` prefix, so a line the agent prints can never pass for one of the worker's own. Each line is cut to 500 characters with control characters stripped, up to 900 lines (Hatchet keeps 1000).
-
-  A file beats stdout because conmon can split long lines and Hatchet caps log lines. claude-code-action hands its results over through a file too. Governs R8, R13, R15.
-- KTD9. **The agent defaults live in `src/corvo/worker/defaults.py`, each with a prose comment, as KTD1 of the precedent does.**
+- KTD9. **The agent defaults stay in `src/corvo/worker/defaults.py`, with sandbox wording.**
 
   | Constant | Value | Why |
   |---|---|---|
-  | `AGENT_EXECUTION_TIMEOUT` | 15 minutes | The longest example session plus container start. |
-  | `AGENT_DEADLINE_MARGIN` | 60 seconds | The in-container budget (KTD4) ends this long before Hatchet's timeout, which leaves time to write, read and clean up. |
-  | `AGENT_SCHEDULE_TIMEOUT` | 60 minutes | Waiting behind the cap counts against it (engine `schedule_timeout_at`). |
+  | `AGENT_EXECUTION_TIMEOUT` | 15 minutes | The longest example session plus the sandbox's start. |
+  | `AGENT_DEADLINE_MARGIN` | 60 seconds | The session budget ends this long before Hatchet's timeout, which leaves time to report and clean up. |
+  | `AGENT_SCHEDULE_TIMEOUT` | 60 minutes | Waiting behind the cap, or for an agent worker that can isolate (R28), counts against it. |
   | `AGENT_WAITING_EXECUTION_TIMEOUT` | 80 minutes | One attempt queued and run (`retries=0`), plus a 5-minute detection margin. |
-  | `AGENT_CONCURRENCY` | `max_runs=2` | A `ConcurrencyExpression` named `corvo-agents`, with a constant key, `GROUP_ROUND_ROBIN` and `is_tenant_scoped=True`. |
-  | `AGENT_MEMORY` | 2 GiB | Anthropic's 1 GiB floor, doubled for the CLI and its tools. |
-  | `AGENT_NANO_CPUS` | 1 CPU | Anthropic's starting point. |
-  | `AGENT_PIDS_LIMIT` | 256 | Above the CLI's threads. Measured in the Haiku proof. |
+  | `AGENT_CONCURRENCY` | `max_runs=2` | A `ConcurrencyExpression` named `corvo-agents`, constant key, `GROUP_ROUND_ROBIN`, `is_tenant_scoped=True`. |
+  | `AGENT_MEMORY` | 2 GiB | Anthropic's 1 GiB floor, doubled for the engine and its tools; swap 0. |
+  | `AGENT_CPUS` | 1 | Anthropic's starting point, written to `cpu.max` (renamed from `AGENT_NANO_CPUS`). |
+  | `AGENT_PIDS_LIMIT` | 256 | Above the engine's threads. Measured in the Haiku proof. |
+  | `AGENT_TMPFS_SIZE` | 512 MiB | Each of a session's `/tmp` and home; charged to its cgroup's memory. |
 
-  - Every agent task passes `retries=0` with these values.
-  - `CANCEL_IN_PROGRESS` is avoided, because it kills paid runs.
-  - The cap is per tenant, and so shared by deployments on one tenant.
+  - Every agent task passes `retries=0` with these values; `CANCEL_IN_PROGRESS` is avoided because it kills paid runs.
+  - The cap is per tenant, so every agent worker and deployment on one tenant shares it. Scaling out means raising it.
+  - The `agents` profile's Hatchet slots equal the cap's `max_runs` (KTD26). Because a cancelled run's slot frees before its cleanup ends, a host still holds memory for cap + 1 sessions (`docs/agents.md`).
 
-  Governs R7, R9, R15.
+  Governs R7, R9, R26.
 - KTD17. **The examples are `tone`, `dir-summary` and `dir-review`, all on `claude-haiku-5-5`.**
-  - **`tone`** (R18) has no tools, `max_turns=3` and `max_budget_usd=0.05`. Its session classifies a text as `friendly`, `neutral` or `unfriendly`. Its output adds `friendly: bool` from `corvo.core.agents.tone`.
-  - **`dir-summary`** (R19) mounts its working directory read-only. It uses `Read`, `Glob`, `Grep` and the custom tool `count_words`, whose logic is `corvo.core.agents.dir_summary.count_words`, with `max_turns=15` and `max_budget_usd=0.25`. Its output is a summary and a word count.
-  - **`dir-review`** (R20) is a DAG. Step `summarize` spawns `dir-summary`, and step `judge`, with parent `summarize`, spawns `tone` on the summary. A core twin builds the review line from both outputs.
-  - A task whose agent works in a directory declares its own input model in the worker module: the agent's input plus `workdir`. The agent receives `/workspace`.
+  - **`tone`** (R18) has no tools, `max_turns=3` and `max_budget_usd=0.05`. It classifies a text as `friendly`, `neutral` or `unfriendly`, and its output adds `friendly: bool` from `corvo.core.agents.tone`.
+  - **`dir-summary`** (R19) works in its directory read-only, with `Read`, `Glob`, `Grep` and the custom tool `count_words`, at `max_turns=15` and `max_budget_usd=0.25`. Its output is a summary and a word count.
+  - `count_words` takes a text and never a path. Custom tools run in the agent worker's process, where a symlink in a working directory resolves against the worker's own files (R30). The tool is async and does no blocking work, because a blocked event loop starves the worker's heartbeats.
+  - **`dir-review`** (R20) is a DAG on the main worker. Step `summarize` spawns `dir-summary`, and step `judge`, with parent `summarize`, spawns `tone` on the summary, both through stubs (KTD26). A core twin builds the review line.
 
-  Governs R10, R18, R19, R20, R21.
+  Governs R10, R18, R19, R20, R21, R30.
+- KTD26. **One `corvo-worker` serves the permission profile that `CORVO_WORKER_PROFILE` names, and the main profile reaches agent tasks only through stubs.**
+  - `corvo.worker.profiles` holds the `Profile` type and `PROFILES`, which maps each profile's name to its module's dotted path: `main` to `corvo.worker.profiles.main`, `agents` to `corvo.worker.profiles.agents`. It imports no profile module.
+  - A profile module exposes one `PROFILE`, a frozen `Profile` with the Hatchet worker's name, its `workflows`, its `slots` (Hatchet's default when unset) and two optional hooks, `before_start` and `on_sigterm`:
+    - `main`: `corvo-worker`, every task and workflow, no hooks. Its list is today's `WORKFLOWS`, moved out of `corvo.worker.worker`.
+    - `agents`: `corvo-agent-worker`, every agent task and nothing else, `slots` equal to the cap's `max_runs` (KTD9), `before_start` running KTD10's checks and sweep, and `on_sigterm` running KTD19's hook.
+  - `corvo.worker.worker.main()` runs logging, reads `worker_profile` (`CORVO_WORKER_PROFILE`, default `main`) from the settings, and imports that profile's module by name with `importlib`. An unknown name exits with status 1, naming the known ones. It then calls `serve(profile)`, which runs `before_start`, creates `hatchet.worker(name, slots=…, workflows=…)`, installs `on_sigterm` after Hatchet's own handler, and starts. The console script stays `corvo-worker`, and no second one exists.
+  - Because the profile is imported by name, nothing the main profile imports reaches an agent task, and KTD2's fourth rule checks that.
+  - `corvo.worker.agent_calls` declares one `hatchet.stubs.task` per agent task, with the same name and the same input and output model classes. The output models come from the agents' `models.py`. A directory agent's task input, its agent input plus `workdir` (KTD7), is declared in `agent_calls` itself, and the task imports it from there, so stub and task share one class. Workflows on the main profile spawn agents through these stubs, so the main profile never imports an agent task.
+  - `tests/worker/test_registration.py` maps each area to its profile: tasks and workflows to `main`, agents to `agents`. It walks `PROFILES`, and fails when an area's definition is missing from its profile's list, when a definition sits on two profiles, or when a name repeats across profiles. It collects `agent_calls`' stubs apart from the areas' definitions, so a stub imported into a workflow module counts neither as unregistered nor as a name clash. Each stub must match an agent task's name and its input and output classes, and a stub on any profile's list fails, since it would take runs and raise.
+  - A later permission profile, such as one with database access or a GitHub bot's, is a module with its `PROFILE`, a line in `PROFILES`, an area pair in the registration test and a compose service, with no new worker code. #37 adds `CORVO_WORKER_NAME` over the profile's name, and a compose test that every service names a known profile and every profile has a service.
+  - (session-settled: user-directed — chosen over a second worker module with its own `main()`, list and console script, which copied the worker's start for what differs only in configuration.)
+
+  Governs R6, R13, R20, R28; AE1.
+
+### Risks
+
+- **A timed-out parent step does not cancel its child.** The session budget bounds the child at `AGENT_EXECUTION_TIMEOUT`.
 
 ## Implementation Units
 
 ### U7. The `dir-review` workflow that spawns both agents
 
-- **Goal:** a contributor can copy a workflow whose steps spawn agents as child runs and combine their outputs.
-- **Requirements:** R7, R20, R21, R24, R25, AE7; KTD9, KTD17.
+- **Goal:** a contributor can copy a workflow whose steps spawn agents as child runs and combine their outputs, from the main worker.
+- **Requirements:** R7, R20, R21, R24, R25; AE7; KTD9, KTD17, KTD26.
 - **Dependencies:** U6.
 - **Files:**
   - Create `src/corvo/core/workflows/dir_review.py` and `tests/core/workflows/test_dir_review.py`.
+  - Modify `src/corvo/worker/agent_calls.py` (the stubs of `tone` and `dir-summary`) and `tests/worker/test_registration.py` (the stubs check).
   - Create `src/corvo/worker/workflows/dir_review.py` and `tests/worker/workflows/test_dir_review.py`.
-  - Modify `src/corvo/worker/worker.py` (`WORKFLOWS`) and `tests/integration/worker/test_agents.py`.
+  - Modify `src/corvo/worker/profiles/main.py` (its list) and `tests/integration/worker/test_agents.py`.
 - **Approach:**
-  1. The core twin builds the review line from the summary's word count and the tone over plain values.
-  2. `hatchet.workflow(name="dir-review")` holds two steps. `summarize` spawns `dir_summary`. `judge`, with parent `summarize`, spawns `tone` on the summary and returns the review through the core twin.
-  3. Both steps declare `retries=0` and `AGENT_WAITING_EXECUTION_TIMEOUT` (R7), the agent counterpart of the precedent's waiting rule.
-  4. The header comment adds the agent-waiting rule and the reason a waiting step holds a worker slot but no agent slot.
+  1. The core twin builds the review line from the word count and the tone over plain values.
+  2. The stubs and their registration check per KTD26.
+  3. `hatchet.workflow(name="dir-review")` holds two steps that spawn through the stubs: `summarize` spawns `dir-summary`, and `judge`, with parent `summarize`, spawns `tone` on the summary.
+  4. Both steps declare `retries=0` and `AGENT_WAITING_EXECUTION_TIMEOUT`.
+  5. The header adds the agent-waiting rule, why a waiting step holds a main-worker slot but no agent slot, and that agents are reached through stubs only.
 - **Patterns to follow:** `src/corvo/worker/workflows/greeting.py` and its tests.
 - **Test scenarios:**
   - The core twin's line names the tone and the word count.
-  - `summarize`, mock-run with `dir_summary.aio_run` replaced, passes the workflow's `workdir` and returns the replacement's output.
-  - `judge`, mock-run with the parent output and `tone.aio_run` replaced, passes the summary as the text and returns the core twin's line.
+  - `summarize`, mock-run with the `dir-summary` stub's `aio_run` replaced, passes the workflow's `workdir` and returns the replacement's output.
+  - `judge`, mock-run with the parent output and the `tone` stub's `aio_run` replaced, passes the summary as the text and returns the core twin's line.
   - Both steps declare `retries == 0` and `AGENT_WAITING_EXECUTION_TIMEOUT`.
-  - Covers AE7. Integration: `dir-review` triggered by name on a working directory under the root returns a review derived from both fakes' structured outputs.
-- **Verification:** unit and integration suites pass. The PR records the workflow's Haiku proof, and the registration test passes with all three definitions in `WORKFLOWS`.
+  - A stub whose output model differs from its task's fails the registration test, and so does a stub placed on either profile's list. A stub imported into `workflows/dir_review.py` counts neither as unregistered nor as a name clash.
+  - Covers AE7. Integration: `dir-review` triggered by name on a working directory returns a review derived from both fakes' outputs. The main worker served the workflow and the agent worker served both children.
+- **Verification:** the suites pass. The pull request records the workflow's Haiku proof, and the registration test passes with `dir-review` on the `main` profile and both agents on the `agents` profile.
 
 ## Verification Contract
 
-- `uv run prek run --all-files`: ruff, format, mypy strict with `types-docker`, lockfile.
-- `uv run pytest tests/test_import_boundaries.py tests/test_settings.py tests/agents tests/core tests/worker`: unit tests, no Docker or Podman.
-- `uv run pytest tests/integration/worker`: integration on compose and the test's rootless Podman (needs Docker and Podman).
-- `uv run --locked --with coverage==7.16.2 coverage run --branch --source=src -m pytest`, then `coverage report --fail-under=90` the same way: CI's coverage floor.
-- The manual Haiku proof in `docs/agents.md`, recorded in the PR.
+- `uv run prek run --all-files`.
+- `uv run pytest tests/core tests/worker`: unit tests.
+- `uv run pytest tests/integration/worker`: integration on compose.
+- Manual: the Haiku runbook, once for `dir-review`.
+- CI: `tnmn.io: python` on the pull request.
 
 ## Definition of Done
 
-- Every gate above passes locally and in CI.
-- U7 when its integration test passes, its Haiku proof is recorded, and the registration test passes with all six definitions in `WORKFLOWS`.
-- No abandoned attempt remains in the diff.
+- Every gate above passes locally, and CI passes on the pull request.
+- The integration tests pass, and the registration test passes with `dir-review` on the `main` profile and both agents on the `agents` profile.
+- The pull request records the workflow's Haiku proof.
+- The whole plan's Definition of Done holds for the stack.
+- No abandoned attempt remains in the diff: no unused helpers, no commented-out code, no leftover tests.
 
 ## Execution: gh stack
 
-- **Stack, bottom to top:** `docs/agents-skeleton-plan` → `feat/agents-u1-podman-fixture` → `feat/agents-u2-boundaries` → `feat/agents-u3-tone-agent` → `feat/agents-u4-container-piece` → `feat/agents-u5-operations` → `feat/agents-u6-dir-summary` → `feat/agents-u7-dir-review`.
-- **This part:** branch `feat/agents-u7-dir-review`, on top of `feat/agents-u6-dir-summary`. Commit only this unit here; a fix a lower part needs goes on that part's branch, then `gh stack rebase`.
-- **Start:** `gh stack init` with the branches above, in order, when the stack does not exist yet (it adopts the existing plans branch); otherwise `gh stack checkout` this branch.
-- **Publish and merge:** `gh stack submit` opens one pull request per layer; `gh stack merge` merges bottom up.
+- **Stack, bottom to top:** `docs/agents-skeleton-plan` → `feat/agents-u1-isolation-gate` → `feat/agents-u2-boundaries` → `feat/agents-u3-tone-agent` → `feat/agents-u4-session-piece` → `feat/agents-u9-agent-worker` → `feat/agents-u8-isolation-probe` → `feat/agents-u5-operations` → `feat/agents-u6-dir-summary` → `feat/agents-u7-dir-review`.
+- **This part:** branch `feat/agents-u7-dir-review`, on top of `feat/agents-u6-dir-summary`, pull request new. Commit only this unit here; a fix a lower part needs goes on that part's branch, then `gh stack rebase`.
+- **Start:** `gh stack checkout` this branch when it exists, or `gh stack add` it on top of the part below.
+- **Publish and merge:** `gh stack submit` opens or updates one pull request per layer; `gh stack merge` merges bottom up.
