@@ -13,7 +13,7 @@ def test_worker_is_named() -> None:
 
 def test_worker_serves_the_registration_list(monkeypatch: pytest.MonkeyPatch) -> None:
     # Worker keeps its list private, so this reads what corvo hands Hatchet.
-    # test_registration.py checks WORKFLOWS against the two areas.
+    # test_registration.py checks WORKFLOWS against the three areas.
     received: dict[str, Any] = {}
     build = hatchet.worker
 
