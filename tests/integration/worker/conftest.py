@@ -15,7 +15,12 @@ import pytest
 from docker import DockerClient
 from hatchet_sdk import ClientConfig, ClientTLSConfig, Hatchet
 
-from .podman import describe, podman_available, podman_service, user_session_env
+from .podman import (
+    describe_podman,
+    podman_available,
+    podman_service,
+    user_session_env,
+)
 
 ROOT = Path(__file__).parents[3]
 # The tenant hatchet-admin quickstart creates, in Hatchet's Docker Compose
@@ -188,7 +193,7 @@ def podman(pytestconfig: pytest.Config) -> Iterator[DockerClient]:
     # which Podman and network each machine ran.
     reporter = pytestconfig.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
-        reporter.write_line(describe(env))
+        reporter.write_line(describe_podman(env))
     root = Path(tempfile.mkdtemp(prefix="corvo-agents-"))
     try:
         with podman_service(root, env) as client:

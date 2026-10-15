@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from docker import DockerClient
 
-from .podman import MANAGED
+from .podman import MANAGED, MANAGED_KEY
 
 # The Python the app's image is built on, named in full: Podman resolves no
 # short name without a registries.conf that allows it.
@@ -71,7 +71,7 @@ def agent_container(**labels: str) -> dict[str, Any]:
         "memswap_limit": 2 * GIB,
         "nano_cpus": 1_000_000_000,
         "pids_limit": 256,
-        "labels": {"corvo.managed": "true", **labels},
+        "labels": {MANAGED_KEY: "true", **labels},
         "name": f"corvo-test-{uuid.uuid4().hex[:8]}",
     }
 

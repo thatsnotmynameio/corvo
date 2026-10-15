@@ -21,7 +21,8 @@ from docker.errors import DockerException
 
 # The label every container the agents start carries, and that teardown
 # removes by.
-MANAGED = "corvo.managed=true"
+MANAGED_KEY = "corvo.managed"
+MANAGED = f"{MANAGED_KEY}=true"
 
 
 def podman_available() -> bool:
@@ -59,7 +60,7 @@ def user_session_env() -> dict[str, str]:
     }
 
 
-def describe(env: dict[str, str]) -> str:
+def describe_podman(env: dict[str, str]) -> str:
     """Podman's version, network and cgroup setup, for the session's log."""
     info = json.loads(
         subprocess.run(
