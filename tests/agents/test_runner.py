@@ -22,8 +22,10 @@ REPORT = RunReport(
 )
 
 
-def request(run_dir: Path, agent: str = "tone", text: str = "Thanks!") -> None:
-    sent = AgentRequest(agent=agent, input={"text": text}, budget_seconds=5)
+def request(
+    run_dir: Path, agent: str = "tone", text: str = "Thanks!", budget: float = 5
+) -> None:
+    sent = AgentRequest(agent=agent, input={"text": text}, budget_seconds=budget)
     (run_dir / "request.json").write_text(sent.model_dump_json())
 
 
@@ -80,8 +82,7 @@ async def test_a_run_past_its_budget_fails_with_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(agent, "run", hanging)
-    sent = AgentRequest(agent="tone", input={"text": "Hi"}, budget_seconds=0.05)
-    (tmp_path / "request.json").write_text(sent.model_dump_json())
+    request(tmp_path, budget=0.05)
 
     await runner.execute(tmp_path)
 
