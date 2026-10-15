@@ -27,12 +27,16 @@ FAKE = Path(__file__).with_name("fake_claude.py")
 TIMEOUT = 20
 
 
-async def collect(prompt: str, options: ClaudeAgentOptions) -> list[Message]:
-    messages = []
+async def collect(
+    prompt: str, options: ClaudeAgentOptions, messages: list[Message] | None = None
+) -> list[Message]:
+    """The session's messages, gathered into messages when given, so a test
+    still has them after query() raises."""
+    gathered = [] if messages is None else messages
     async with asyncio.timeout(TIMEOUT):
         async for message in query(prompt=prompt, options=options):
-            messages.append(message)
-    return messages
+            gathered.append(message)
+    return gathered
 
 
 def last_result(messages: list[Message]) -> ResultMessage:
@@ -68,12 +72,9 @@ async def test_the_turn_limit_ends_in_an_error_result_then_result_error() -> Non
     messages: list[Message] = []
 
     with pytest.raises(ResultError) as error:
-        async with asyncio.timeout(TIMEOUT):
-            async for message in query(
-                prompt="fake:max-turns",
-                options=ClaudeAgentOptions(cli_path=FAKE, max_turns=3),
-            ):
-                messages.append(message)
+        await collect(
+            "fake:max-turns", ClaudeAgentOptions(cli_path=FAKE, max_turns=3), messages
+        )
 
     assert error.value.subtype == "error_max_turns"
     result = last_result(messages)
@@ -89,11 +90,7 @@ async def test_an_api_error_is_a_success_result_with_is_error() -> None:
     messages: list[Message] = []
 
     with pytest.raises(ResultError):
-        async with asyncio.timeout(TIMEOUT):
-            async for message in query(
-                prompt="fake:api-error", options=ClaudeAgentOptions(cli_path=FAKE)
-            ):
-                messages.append(message)
+        await collect("fake:api-error", ClaudeAgentOptions(cli_path=FAKE), messages)
 
     result = last_result(messages)
     assert (result.subtype, result.is_error) == ("success", True)
