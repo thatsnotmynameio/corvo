@@ -1,5 +1,7 @@
+from collections.abc import AsyncIterator
+
 import pytest
-from claude_agent_sdk import ProcessError, ResultError
+from claude_agent_sdk import Message, ProcessError, ResultError
 from pydantic import BaseModel
 
 from agents.scripted import SESSION_ID, ScriptedQuery, init, result
@@ -17,6 +19,10 @@ def report(subtype: str) -> RunReport:
     )
 
 
+def discard(line: str) -> None:
+    pass
+
+
 def max_turns_error() -> ResultError:
     return ResultError(
         "Claude Code returned an error result: error_max_turns",
@@ -28,20 +34,24 @@ def max_turns_error() -> ResultError:
 async def test_a_valid_structured_output_is_returned_with_the_report() -> None:
     session = ScriptedQuery(init(), result(structured_output={"tone": "friendly"}))
 
-    verdict, run_report = await consume(session.stream(), Verdict)
+    verdict, run_report = await consume(session.stream(), Verdict, discard)
 
     assert verdict == Verdict(tone="friendly")
     assert run_report == report("success")
 
 
-async def test_the_session_id_goes_to_stderr_when_the_session_starts(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    session = ScriptedQuery(init(), result(structured_output={"tone": "friendly"}))
+async def test_the_session_id_is_logged_when_the_session_starts() -> None:
+    lines: list[str] = []
 
-    await consume(session.stream(), Verdict)
+    async def messages() -> AsyncIterator[Message]:
+        yield init()
+        # Logged before any result arrives.
+        assert lines == [f"session {SESSION_ID}"]
+        yield result(structured_output={"tone": "friendly"})
 
-    assert capsys.readouterr().err == f"session {SESSION_ID}\n"
+    await consume(messages(), Verdict, lines.append)
+
+    assert lines == [f"session {SESSION_ID}"]
 
 
 async def test_the_turn_limit_fails_with_its_subtype_and_report() -> None:
@@ -52,7 +62,7 @@ async def test_the_turn_limit_fails_with_its_subtype_and_report() -> None:
     )
 
     with pytest.raises(AgentRunFailed) as failure:
-        await consume(session.stream(), Verdict)
+        await consume(session.stream(), Verdict, discard)
 
     assert failure.value.reason == "error_max_turns"
     assert failure.value.report == report("error_max_turns")
@@ -66,7 +76,7 @@ async def test_an_api_error_reported_as_success_fails() -> None:
     )
 
     with pytest.raises(AgentRunFailed) as failure:
-        await consume(session.stream(), Verdict)
+        await consume(session.stream(), Verdict, discard)
 
     assert failure.value.reason == "api_error"
     assert failure.value.report == report("success")
@@ -76,7 +86,7 @@ async def test_a_success_without_structured_output_fails() -> None:
     session = ScriptedQuery(init(), result())
 
     with pytest.raises(AgentRunFailed) as failure:
-        await consume(session.stream(), Verdict)
+        await consume(session.stream(), Verdict, discard)
 
     assert failure.value.reason == "no_structured_output"
     assert failure.value.report == report("success")
@@ -86,7 +96,7 @@ async def test_a_structured_output_that_does_not_validate_fails() -> None:
     session = ScriptedQuery(init(), result(structured_output={"mood": "friendly"}))
 
     with pytest.raises(AgentRunFailed) as failure:
-        await consume(session.stream(), Verdict)
+        await consume(session.stream(), Verdict, discard)
 
     assert failure.value.reason == "invalid_structured_output"
 
@@ -95,7 +105,7 @@ async def test_a_process_that_fails_without_a_result_keeps_the_session_id() -> N
     session = ScriptedQuery(init(), error=ProcessError("crashed", exit_code=137))
 
     with pytest.raises(AgentRunFailed) as failure:
-        await consume(session.stream(), Verdict)
+        await consume(session.stream(), Verdict, discard)
 
     assert failure.value.reason == "process_failed"
     assert failure.value.report == RunReport(session_id=SESSION_ID)
@@ -109,7 +119,7 @@ async def test_a_process_that_fails_after_a_success_keeps_its_report() -> None:
     )
 
     with pytest.raises(AgentRunFailed) as failure:
-        await consume(session.stream(), Verdict)
+        await consume(session.stream(), Verdict, discard)
 
     assert failure.value.reason == "process_failed"
     assert failure.value.report == report("success")
@@ -119,6 +129,6 @@ async def test_a_session_that_ends_without_a_result_fails() -> None:
     session = ScriptedQuery(init())
 
     with pytest.raises(AgentRunFailed) as failure:
-        await consume(session.stream(), Verdict)
+        await consume(session.stream(), Verdict, discard)
 
     assert failure.value.reason == "no_result"

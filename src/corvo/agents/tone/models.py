@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 type Tone = Literal["friendly", "neutral", "unfriendly"]
 
-# The agent works in no directory, so the container mounts none.
+# The agent works in no directory, so its session has none.
 WRITES_WORKDIR = False
 
 

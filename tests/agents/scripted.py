@@ -1,14 +1,31 @@
 """A scripted session, which an agent's unit tests put in place of query().
 
 The tests replace query on the agent's module with a ScriptedQuery, which
-yields real SDK messages and records what the agent passed it (KTD14).
+yields real SDK messages and records what the agent passed it (KTD14), and
+hand the agent a Session such as the session piece builds.
 """
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, Message, ResultMessage, SystemMessage
 
+from corvo.agents.session import Session, sandbox_settings
+
 SESSION_ID = "4f0c2b9e-session"
+
+
+def session(lines: list[str] | None = None) -> Session:
+    """A Session whose stderr and log lines go to lines, when given."""
+    kept = [] if lines is None else lines
+    return Session(
+        cli_path=Path("/usr/local/bin/corvo-agent-sandbox"),
+        cwd=None,
+        env={"CORVO_SANDBOX_CGROUP": "/sys/fs/cgroup/agents/run-1"},
+        sandbox=sandbox_settings(),
+        stderr=kept.append,
+        log=kept.append,
+    )
 
 
 def init() -> SystemMessage:
