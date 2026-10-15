@@ -5,7 +5,13 @@ from collections.abc import Iterator
 
 import pytest
 
-from corvo.agents.frame import MAX_UNTRUSTED_BYTES, FrameError, encode, read_frame
+from corvo.agents.frame import (
+    MAX_UNTRUSTED_BYTES,
+    FrameError,
+    encode,
+    extract,
+    read_frame,
+)
 
 
 @pytest.fixture
@@ -80,14 +86,14 @@ def test_a_header_with_no_newline_in_its_length_is_refused(
 def test_a_frame_cut_short_by_the_end_of_input_is_truncated(
     pipe: tuple[int, int],
 ) -> None:
-    with pytest.raises(FrameError, match="truncated after 5 bytes"):
+    with pytest.raises(FrameError, match="truncated after 8 bytes"):
         read_frame(fed(pipe, b"10\nhello"), timeout=1)
 
 
 def test_a_frame_whose_bytes_never_arrive_ends_at_the_deadline(
     pipe: tuple[int, int],
 ) -> None:
-    with pytest.raises(FrameError, match="deadline, 5 bytes into a frame"):
+    with pytest.raises(FrameError, match="the deadline, after 8 bytes"):
         read_frame(fed(pipe, b"10\nhello", close=False), timeout=0.2)
 
 
@@ -115,3 +121,25 @@ def test_the_deadline_is_total_across_a_slow_trickle(pipe: tuple[int, int]) -> N
 
 def test_bytes_after_the_first_frame_are_ignored(pipe: tuple[int, int]) -> None:
     assert read_frame(fed(pipe, b"3\nabc7\nanother"), timeout=1) == b"abc"
+
+
+def test_a_whole_frame_is_extracted_and_what_follows_ignored() -> None:
+    assert extract(encode(b"abc") + b"7\nanother") == b"abc"
+
+
+@pytest.mark.parametrize("data", [b"", b"1", b"12\n", b"12\nhello"])
+def test_a_frame_not_all_there_is_missing(data: bytes) -> None:
+    assert extract(data) is None
+
+
+@pytest.mark.parametrize(
+    "data", [b"garbage", b"05", b"-3\nabc", b"1" * 100, b" 3\nabc", b"x" + encode(b"a")]
+)
+def test_bytes_that_start_no_frame_are_invalid(data: bytes) -> None:
+    with pytest.raises(FrameError, match="invalid frame header"):
+        extract(data)
+
+
+def test_a_frame_over_the_cap_is_invalid() -> None:
+    with pytest.raises(FrameError, match=f"over {MAX_UNTRUSTED_BYTES}"):
+        extract(b"%d\n" % (MAX_UNTRUSTED_BYTES + 1))
