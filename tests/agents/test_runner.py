@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 from pathlib import Path
 
 import pytest
@@ -167,8 +168,8 @@ def fake_root(root: Path) -> Path:
 def test_the_probe_reports_what_it_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Keep the probe's connects off the network: a refusal still reaches.
-    monkeypatch.setattr(runner, "METADATA_ADDRESS", "127.0.0.1")
+    # Only the gateway answers; reaches itself is tested below.
+    monkeypatch.setattr(runner, "reaches", lambda address: address == "127.0.0.1")
 
     report = runner.probe(fake_root(tmp_path))
 
@@ -187,4 +188,42 @@ def test_the_probe_reports_what_it_read(
     assert "PATH" in report.env_names
     assert report.gateway == "127.0.0.1"
     assert report.gateway_reachable
-    assert report.metadata_reachable
+    assert not report.metadata_reachable
+
+
+def test_without_a_default_route_the_gateway_is_not_probed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "reaches", lambda address: False)
+    root = fake_root(tmp_path)
+    (root / "proc" / "net" / "route").write_text(ROUTE.splitlines(keepends=True)[0])
+
+    report = runner.probe(root)
+
+    assert (report.gateway, report.gateway_reachable) == (None, None)
+
+
+def test_an_address_that_accepts_is_reached(monkeypatch: pytest.MonkeyPatch) -> None:
+    with socket.create_server(("127.0.0.1", 0)) as server:
+        monkeypatch.setattr(runner, "PROBE_PORT", server.getsockname()[1])
+
+        assert runner.reaches("127.0.0.1")
+
+
+def test_an_address_that_refuses_is_reached(monkeypatch: pytest.MonkeyPatch) -> None:
+    with socket.create_server(("127.0.0.1", 0)) as server:
+        closed = server.getsockname()[1]
+    monkeypatch.setattr(runner, "PROBE_PORT", closed)
+
+    assert runner.reaches("127.0.0.1")
+
+
+def test_an_address_that_never_answers_is_not_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def silent(address: tuple[str, int], timeout: float) -> socket.socket:
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(socket, "create_connection", silent)
+
+    assert not runner.reaches("169.254.169.254")
