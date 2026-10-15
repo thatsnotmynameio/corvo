@@ -178,8 +178,8 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
   - Create, in `src/corvo/worker/agent_runtime/`, `entrypoint.sh`, `seccomp.py`, `seccomp.json`, `seccomp-moby-default.json` and `seccomp-moby-default.LICENSE`.
   - Create `src/corvo/worker/agent_runtime/__init__.py` and `src/corvo/worker/agent_runtime/sandbox.py`.
   - Create `tests/worker/agent_runtime/__init__.py`, `test_sandbox.py` and `test_seccomp.py`.
-  - Create `tests/agents/__init__.py`, `tests/agents/scripted_api.py`, `tests/integration/worker/test_isolation_gate.py` and the gate's driver under `tests/integration/worker/gate/`.
-  - Modify `.github/python.yml`: a Trunk collection `corvo-agents` for `tests/agents`, which this unit creates, and its `--ignore` in the last collection, since the file keeps one collection per directory of `tests/`. The collection is made in Trunk first, for its ID. The file applies from a pull request's base, so U2, the first unit with tests there, picks it up.
+  - Create `tests/agents/__init__.py`, `tests/agents/scripted_api.py`, `tests/agents/test_scripted_api.py`, `tests/integration/worker/test_isolation_gate.py` and the gate's driver under `tests/integration/worker/gate/`.
+  - Modify `.github/python.yml`: a Trunk collection `corvo-agents` for `tests/agents`, which this unit creates, and its `--ignore` in the last collection, since the file keeps one collection per directory of `tests/`. The collection exists in Trunk, as `YJ9od0SO`. `tests/agents/test_scripted_api.py` keeps it from running empty on `main`.
 - **Approach:**
   1. The `agent-worker` stage and its entrypoint per KTD13, with the closing `FROM app` kept.
   2. The profile generator and its diff test per KTD23.
