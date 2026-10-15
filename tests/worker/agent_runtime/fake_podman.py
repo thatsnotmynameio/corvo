@@ -9,6 +9,7 @@ its deadline would.
 """
 
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +45,8 @@ class FakeContainer:
         self.exit = Exit()
         # A removal that fails with this status code, once.
         self.remove_fails_with: int | None = None
+        # Seconds a removal takes, as a slow Podman's would.
+        self.remove_takes = 0.0
         self.attrs: dict[str, Any] = {"State": {"OOMKilled": False}}
 
     @property
@@ -68,6 +71,8 @@ class FakeContainer:
             self.removed.wait()
 
     def wait(self) -> dict[str, int]:
+        if self.exit.hangs:
+            self.removed.wait()
         if self.removed.is_set():
             raise NotFound("no such container")
         return {"StatusCode": self.exit.code}
@@ -79,6 +84,7 @@ class FakeContainer:
     def remove(self, force: bool = False) -> None:
         assert force
         self.client.removals.append(self.name)
+        time.sleep(self.remove_takes)
         if self.remove_fails_with is not None:
             status, self.remove_fails_with = self.remove_fails_with, None
             response = requests.Response()
@@ -139,6 +145,8 @@ class FakeClient:
         self.removals: list[str] = []
         self.lookups: list[dict[str, str]] = []
         self.closed = False
+        # What DockerClient was given, when a test connects through it.
+        self.options: dict[str, object] = {}
 
     def close(self) -> None:
         self.closed = True

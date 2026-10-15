@@ -219,7 +219,7 @@ def probe_problems(report: ProbeReport, fingerprint: str) -> list[str]:
         if read != wanted
     ]
     if report.cap_eff != NO_CAPABILITIES:
-        found.append(f"the effective capabilities are {report.cap_eff}, not none")
+        found.append(f"the effective capabilities are {report.cap_eff!r}, not none")
     if not report.root_read_only:
         found.append("the root filesystem is writable")
     for point, mib in TMPFS_MIB.items():

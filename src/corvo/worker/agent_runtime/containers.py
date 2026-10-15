@@ -65,6 +65,12 @@ MAX_PENDING = MAX_LINE * 4
 # How long cleanup may take, under a cancel or a timeout.
 CLEANUP_TIMEOUT = 30
 
+# How long one Podman API call may take: below CLEANUP_TIMEOUT, so a create
+# that cleanup waits for returns while cleanup can still remove its
+# container. docker-py's own default is 60 seconds. Its log stream and wait
+# drop the timeout, so a session may stay silent for longer.
+PODMAN_TIMEOUT = 10
+
 NOT_CONFIGURED = "agents are not configured"
 
 
@@ -310,7 +316,12 @@ def make_run_dir(path: Path) -> None:
 
 def write_request(path: Path, request: AgentRequest) -> None:
     """Writes request.json, failing on anything already at path, a link
-    included."""
+    included.
+
+    It is group-readable on purpose: the container runs as the dedicated
+    Podman user, which reads it through the run directory's corvo-agents
+    group (KTD7). It holds the agent's input, never the credential.
+    """
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     with os.fdopen(os.open(path, flags, 0o640), "w") as file:
         file.write(request.model_dump_json())
@@ -356,11 +367,9 @@ async def remove_run(
 
 
 async def shielded(cleanup: Coroutine[Any, Any, None]) -> None:
-    """Runs cleanup to its end within CLEANUP_TIMEOUT, even when the task is
-    cancelled while it runs."""
-    await asyncio.shield(
-        asyncio.ensure_future(asyncio.wait_for(cleanup, CLEANUP_TIMEOUT))
-    )
+    """Runs cleanup to its end, even when the task is cancelled while it
+    runs. The cleanup bounds itself."""
+    await asyncio.shield(asyncio.ensure_future(cleanup))
 
 
 async def run_agent[T: BaseModel](
@@ -434,12 +443,15 @@ async def clean_up(
     calls: Calls,
     log: Callable[[str], None],
 ) -> None:
-    """Removes the run's container and run directory. A failure is logged,
-    not raised: it must not hide how the run itself ended."""
+    """Removes the run's container and run directory within CLEANUP_TIMEOUT.
+    A failure, the timeout included, is logged, not raised: it must not hide
+    how the run itself ended. The run then stays in flight, for the SIGTERM
+    hook to retry."""
     try:
-        await remove_run(
-            runtime.client, task_run_label(run.task_run_id), run_dir, calls
-        )
+        async with asyncio.timeout(CLEANUP_TIMEOUT):
+            await remove_run(
+                runtime.client, task_run_label(run.task_run_id), run_dir, calls
+            )
         runtime.in_flight.discard(run.task_run_id)
     except Exception as error:
         log(f"agent {run.agent}: cleanup failed: {type(error).__name__}: {error}")

@@ -6,7 +6,9 @@ built by the same spec as every run, compares the probe's report with that
 spec and with the worker's own fingerprint, and sweeps the containers of
 this deployment whose run has ended. Any failure disables agents, with the
 reason logged, until the worker restarts: every agent run then fails at
-once with that reason, and every other task keeps working. The probe is
+once with that reason, and every other task keeps working. A sweep that
+runs past its own bound only warns: what it did not reach stays for the
+next start, as a container whose run it could not read does. The probe is
 also the cgroup check: on cgroup v2, a limit whose controller the host
 does not delegate keeps the container from starting.
 
@@ -38,6 +40,7 @@ from corvo.worker.agent_runtime import containers
 from corvo.worker.agent_runtime.containers import (
     CLEANUP_TIMEOUT,
     NOT_CONFIGURED,
+    PODMAN_TIMEOUT,
     Calls,
     Runtime,
     UntrustedFile,
@@ -132,6 +135,19 @@ async def sweep(client: DockerClient, deployment: str, status_of: StatusOf) -> N
                 pass
 
 
+async def clean_up_probe(
+    client: DockerClient, label: str, run_dir: Path, calls: Calls
+) -> None:
+    """Removes the probe's container and run directory within
+    CLEANUP_TIMEOUT. A failure is logged, not raised: the probe's own outcome
+    decides whether agents run."""
+    try:
+        async with asyncio.timeout(CLEANUP_TIMEOUT):
+            await remove_run(client, label, run_dir, calls)
+    except Exception:
+        logger.exception("removing the probe's container failed")
+
+
 async def probe(client: DockerClient, settings: Settings, deployment: str) -> None:
     """Runs corvo-agent probe in the spec's container, with no credential and
     no working directory, and raises Disabled when its report differs from
@@ -169,7 +185,7 @@ async def probe(client: DockerClient, settings: Settings, deployment: str) -> No
         except ValidationError:
             raise Disabled("the probe's report is invalid") from None
     finally:
-        await shielded(remove_run(client, label, run_dir, calls))
+        await shielded(clean_up_probe(client, label, run_dir, calls))
 
     problems = probe_problems(report, fingerprint())
     if problems:
@@ -209,7 +225,9 @@ async def checked_runtime(
 ) -> Runtime:
     if not settings.agent_credential:
         raise Disabled("CORVO_AGENT_CREDENTIAL is empty")
-    client = DockerClient(base_url=f"unix://{settings.agent_podman_socket}")
+    client = DockerClient(
+        base_url=f"unix://{settings.agent_podman_socket}", timeout=PODMAN_TIMEOUT
+    )
     try:
         await check(client, settings, deployment, status_of)
     except BaseException:
@@ -248,6 +266,36 @@ async def prepare(settings: Settings, deployment: str, status_of: StatusOf) -> N
         return
     containers.enable(runtime)
     logger.info("agents are enabled")
+
+
+async def prepare_until_stopped(
+    settings: Settings, deployment: str, status_of: StatusOf
+) -> bool:
+    """Prepares agents, unless SIGTERM arrives first, and says whether it did.
+
+    Hatchet's handler and the SIGTERM hook do not exist yet while agents are
+    prepared. A SIGTERM then cancels the preparation rather than ending the
+    process, so the probe's cleanup still removes its container.
+    """
+    preparing = asyncio.current_task()
+    assert preparing is not None
+    stopped = False
+
+    def stop() -> None:
+        nonlocal stopped
+        stopped = True
+        preparing.cancel()
+
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, stop)
+    try:
+        await prepare(settings, deployment, status_of)
+    except asyncio.CancelledError:
+        if not stopped:
+            raise
+    finally:
+        loop.remove_signal_handler(signal.SIGTERM)
+    return stopped
 
 
 # The hook's task, kept from the garbage collector until it ends.

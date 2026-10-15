@@ -10,7 +10,7 @@ from corvo.worker.agent_runtime.spec import deployment_label
 from corvo.worker.agent_runtime.startup import (
     hatchet_status,
     install_sigterm_hook,
-    prepare,
+    prepare_until_stopped,
 )
 from corvo.worker.agents.tone import tone
 from corvo.worker.hatchet_client import hatchet
@@ -41,9 +41,13 @@ def main() -> None:
         level=logging.INFO, format="[%(levelname)s]\t%(name)s -- %(message)s"
     )
     # Before the worker serves anything, so no agent run finds agents
-    # unprepared.
+    # unprepared. A SIGTERM meanwhile stops the worker before it starts.
     deployment = deployment_label(hatchet.config.tenant_id, hatchet.config.server_url)
-    asyncio.run(prepare(get_settings(), deployment, hatchet_status(hatchet)))
+    settings = get_settings()
+    if asyncio.run(
+        prepare_until_stopped(settings, deployment, hatchet_status(hatchet))
+    ):
+        return
     worker = create_worker()
     # After the worker installs its own handler, which the hook hands over to.
     install_sigterm_hook()

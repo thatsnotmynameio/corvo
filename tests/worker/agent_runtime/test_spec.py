@@ -223,7 +223,11 @@ def test_a_report_that_matches_the_spec_has_no_problem() -> None:
         ({"pids_max": "max"}, f"pids.max is 'max', not '{AGENT_PIDS_LIMIT}'"),
         (
             {"cap_eff": "00000000a80425fb"},
-            "the effective capabilities are 00000000a80425fb, not none",
+            "the effective capabilities are '00000000a80425fb', not none",
+        ),
+        (
+            {"cap_eff": "0\nforged entry"},
+            "the effective capabilities are '0\\nforged entry', not none",
         ),
         ({"root_read_only": False}, "the root filesystem is writable"),
         (

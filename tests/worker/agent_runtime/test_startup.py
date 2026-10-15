@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import signal
 from collections.abc import Iterator
 from pathlib import Path
@@ -36,7 +37,12 @@ def probing(probed: ProbeReport, code: int = 0) -> Behaviour:
 def podman(monkeypatch: pytest.MonkeyPatch) -> FakeClient:
     client = FakeClient(probing(matching_report()))
     client.images.present.add(IMAGE)
-    monkeypatch.setattr(startup, "DockerClient", lambda base_url: client)
+
+    def connect(**options: object) -> FakeClient:
+        client.options = options
+        return client
+
+    monkeypatch.setattr(startup, "DockerClient", connect)
     # Each test leaves the state as it found it.
     monkeypatch.setattr(containers, "state", containers.NOT_CONFIGURED)
     return client
@@ -69,6 +75,18 @@ async def test_a_probe_that_matches_enables_agents(
     assert runtime.deployment == DEPLOYMENT
     assert "agents are enabled" in caplog.messages
     assert not podman.closed
+
+
+async def test_each_podman_call_returns_within_the_cleanup_bound(
+    podman: FakeClient, settings: Settings
+) -> None:
+    await startup.prepare(settings, DEPLOYMENT, nothing_ran)
+
+    # A create the cleanup waits for returns while the cleanup can still
+    # remove its container.
+    timeout = podman.options["timeout"]
+    assert isinstance(timeout, int)
+    assert 0 < timeout < containers.CLEANUP_TIMEOUT
 
 
 async def test_the_probe_runs_the_spec_without_a_credential(
@@ -335,3 +353,57 @@ async def test_sigterm_without_agents_hands_over_at_once(
     signal.raise_signal(signal.SIGTERM)
 
     assert sigterm == [signal.SIGTERM]
+
+
+async def test_sigterm_hands_over_even_when_the_removal_fails(
+    sigterm: list[int],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client = FakeClient()
+    client.stray(**{"corvo.task_run_id": "mine"}).remove_fails_with = 500
+    runtime = Runtime(
+        client=cast(DockerClient, client),
+        root=tmp_path,
+        image=IMAGE,
+        credential=Credential(kind="api_key", value="secret"),
+        deployment=DEPLOYMENT,
+        in_flight={"mine"},
+    )
+    monkeypatch.setattr(containers, "state", runtime)
+    startup.install_sigterm_hook()
+
+    signal.raise_signal(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        while not sigterm:
+            await asyncio.sleep(0.01)
+
+    assert sigterm == [signal.SIGTERM]
+    assert "removing the in-flight agent containers failed" in caplog.messages
+
+
+async def test_sigterm_during_preparation_removes_the_probe(
+    podman: FakeClient, settings: Settings
+) -> None:
+    podman.behaviour = lambda run_dir: Exit(hangs=True)
+    preparing = asyncio.create_task(
+        startup.prepare_until_stopped(settings, DEPLOYMENT, nothing_ran)
+    )
+    async with asyncio.timeout(5):
+        while not (podman.containers.made and podman.containers.made[0].started):
+            await asyncio.sleep(0.01)
+
+    os.kill(os.getpid(), signal.SIGTERM)
+
+    async with asyncio.timeout(5):
+        assert await preparing
+    assert podman.containers.made == []
+    assert list((Path(settings.agent_root) / "runs").iterdir()) == []
+
+
+async def test_preparation_that_ends_reports_no_stop(
+    podman: FakeClient, settings: Settings
+) -> None:
+    assert not await startup.prepare_until_stopped(settings, DEPLOYMENT, nothing_ran)
+    assert isinstance(containers.state, Runtime)

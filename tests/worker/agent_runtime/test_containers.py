@@ -390,3 +390,53 @@ async def test_a_container_removed_mid_run_fails_on_its_missing_envelope(
     with pytest.raises(AgentFailed, match="no envelope"):
         await run
     assert any("exit_code=unknown" in line for line in logged)
+
+
+def removal(
+    podman: FakeClient, fails_with: int | None = None, takes: float = 0
+) -> None:
+    """Has the run's container fail or stall its removal."""
+    behaviour = podman.behaviour
+
+    def failing(run_dir: Path) -> Exit:
+        [container] = podman.containers.made
+        container.remove_fails_with = fails_with
+        container.remove_takes = takes
+        return behaviour(run_dir)
+
+    podman.behaviour = failing
+
+
+@pytest.mark.parametrize(
+    ("fails_with", "takes", "error"), [(500, 0, "APIError"), (None, 1, "TimeoutError")]
+)
+async def test_a_cleanup_that_fails_keeps_the_runs_output_and_logs_it(
+    podman: FakeClient,
+    logged: list[str],
+    ids: None,
+    monkeypatch: pytest.MonkeyPatch,
+    fails_with: int | None,
+    takes: float,
+    error: str,
+) -> None:
+    monkeypatch.setattr(containers, "CLEANUP_TIMEOUT", 0.2)
+    removal(podman, fails_with=fails_with, takes=takes)
+
+    output = await example.aio_mock_run(ToneInput(text="Thanks!"))
+
+    assert output.friendly
+    assert any(
+        line.startswith(f"agent tone: cleanup failed: {error}") for line in logged
+    )
+    # Left for the SIGTERM hook to retry.
+    assert cast(Runtime, containers.state).in_flight == {"task-1"}
+
+
+async def test_a_cleanup_that_fails_keeps_the_runs_own_failure(
+    podman: FakeClient, logged: list[str]
+) -> None:
+    podman.behaviour = writes(Failed(reason="error_max_turns", report=REPORT), code=1)
+    removal(podman, fails_with=500)
+
+    with pytest.raises(AgentFailed, match="agent tone failed: error_max_turns"):
+        await example.aio_mock_run(ToneInput(text="Thanks!"))
