@@ -27,7 +27,7 @@ Read the code on the branches named here, not the plans that produced it.
   - 5ee4c09 keeps only the three empty agent areas; its pin moved to U1.
   - b3bc08e (settings) is trimmed and extended per KTD12, and gains `worker_profile`.
   - b0ea5b6, 9603eed and 71f9efc (the boundary test) keep their pure checker and fixtures; the fourth rule is narrowed and the fifth added.
-  - 1cfec79 and a896c65 (the guard) and 1698f6c (Trunk's `corvo-agents` collection) stay as they are.
+  - 1cfec79 and a896c65 (the guard) stay as they are. 1698f6c (Trunk's `corvo-agents` collection) is dropped: U1 adds the same entry.
   - e36a843 (the registration test) becomes the walk over `PROFILES`.
 - On `main`: `src/corvo/worker/worker.py`'s `WORKFLOWS`, `create_worker()` and `main()`, whose list moves to the `main` profile.
 
