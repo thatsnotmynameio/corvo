@@ -2,7 +2,8 @@
 
 The worker writes an AgentRequest to request.json in the run directory, and
 the container's entrypoint (corvo.agents.runner) writes the envelope, a
-Succeeded or a Failed, to result.json. The worker imports this module, so it
+Succeeded or a Failed, to result.json; the startup probe writes its
+ProbeReport to probe.json. The worker imports this module, so it
 imports only Pydantic and the standard library, never the SDK. The worker
 treats every file the container wrote as untrusted, and validates it here.
 """
@@ -57,3 +58,29 @@ class Failed(BaseModel):
 ENVELOPE: TypeAdapter[Succeeded | Failed] = TypeAdapter(
     Annotated[Succeeded | Failed, Field(discriminator="status")]
 )
+
+
+class ProbeReport(BaseModel):
+    """What corvo-agent probe read inside its container, to probe.json.
+
+    The worker compares it with the container spec it asked for and with its
+    own fingerprint before it serves any agent (KTD10).
+    """
+
+    protocol: Literal[1] = 1
+    fingerprint: str
+    # The cgroup's limits, as their files read: "max" when unlimited.
+    memory_max: str
+    cpu_max: str
+    pids_max: str
+    # The effective capabilities, the hex mask /proc/self/status gives.
+    cap_eff: str
+    env_names: list[str]
+    root_read_only: bool
+    # The options of the /tmp and /home/agent mounts.
+    mounts: dict[str, list[str]]
+    # The default gateway, None without a default route.
+    gateway: str | None
+    # Whether a one-second TCP connect reached it, or the metadata address.
+    gateway_reachable: bool | None
+    metadata_reachable: bool

@@ -24,6 +24,8 @@ dependencies = [
 # The worker's entry point, as Hatchet's Python quickstart declares its own.
 [project.scripts]
 corvo-worker = "corvo.worker.worker:main"
+# The entry point of every agent container: the agent image's ENTRYPOINT.
+corvo-agent = "corvo.agents.runner:main"
 
 # corvo runs on Linux only: its image, CI, and the rootless Podman its agents
 # run on. The lock resolves for Linux alone, so it carries no package another
