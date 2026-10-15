@@ -53,7 +53,29 @@ def imported_names(source: str) -> tuple[set[str], bool]:
                     for alias in node.names
                     if alias.name != "*"
                 )
+        elif (name := dynamic_import(node)) is not None:
+            if name.startswith("."):
+                relative = True
+            else:
+                names.add(name)
     return names, relative
+
+
+def dynamic_import(node: ast.AST) -> str | None:
+    """The module an __import__ or import_module call names in a literal."""
+    if not (isinstance(node, ast.Call) and node.args):
+        return None
+    function = node.func
+    if isinstance(function, ast.Name):
+        called = function.id
+    elif isinstance(function, ast.Attribute):
+        called = function.attr
+    else:
+        return None
+    target = node.args[0]
+    if called in ("__import__", "import_module") and isinstance(target, ast.Constant):
+        return target.value if isinstance(target.value, str) else None
+    return None
 
 
 def internal_edges(names: Iterable[str], modules: Iterable[str]) -> set[str]:
@@ -281,3 +303,18 @@ def test_the_tree_is_read_by_dotted_name(tmp_path: Path) -> None:
         "corvo.agents": "import a\n",
         "corvo.agents.tone": "import b\n",
     }
+
+
+def test_a_dynamic_import_by_name_counts() -> None:
+    source = (
+        "import importlib\n"
+        'importlib.import_module("claude_agent_sdk")\n'
+        '__import__("claude_agent_sdk.types")\n'
+    )
+
+    found = problems({"corvo.worker.agents.x": source})
+
+    assert found == [
+        "corvo.worker.agents.x imports claude_agent_sdk: "
+        "only corvo.agents imports the Claude Agent SDK"
+    ]
