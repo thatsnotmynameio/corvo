@@ -6,9 +6,11 @@
 coverage: 90
 # Trunk Flaky Tests' test collections, each with the pytest arguments that
 # pick its tests: one for each directory of tests/, and the last one for the
-# rest (test_settings.py and any test outside them). Each runs in a job of its
-# own, and its results go to its collection.
+# rest (test_settings.py, test_import_boundaries.py and any test outside
+# them). Each runs in a job of its own, and its results go to its collection.
 trunk:
+  - collection: YJ9od0SO # corvo-agents
+    pytest: [tests/agents]
   - collection: 29TSvQtU # corvo-core
     pytest: [tests/core]
   - collection: iEWIqdL3 # corvo-integration
@@ -18,4 +20,4 @@ trunk:
   - collection: Sz6YOghs # corvo-worker
     pytest: [tests/worker]
   - collection: IJbTawYj # corvo
-    pytest: [tests, --ignore=tests/core, --ignore=tests/integration, --ignore=tests/server, --ignore=tests/worker]
+    pytest: [tests, --ignore=tests/agents, --ignore=tests/core, --ignore=tests/integration, --ignore=tests/server, --ignore=tests/worker]
