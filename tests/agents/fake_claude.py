@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """A stand-in for the claude CLI, which never reaches Claude.
 
-The SDK runs it through cli_path, or in the test image in place of the CLI
-it bundles. It speaks the stream-json protocol of the SDK's subprocess
-transport, after the SDK's own tests/test_run_end_subprocess.py: it answers
+The SDK runs it through cli_path, and in the integration stack the sandbox
+wrapper runs it as the engine. It speaks the stream-json protocol of the
+SDK's subprocess transport, after the SDK's own
+tests/test_run_end_subprocess.py: it answers
 -v, replies to each control_request, calls custom tools through
 mcp_message, and ends the session with a result.
 
@@ -14,12 +15,15 @@ The prompt picks the scenario:
 - fake:max-turns, an error_max_turns result, then exit 1, as the CLI does;
 - fake:api-error, a success result with is_error, then exit 1;
 - fake:hang, no answer at all, until the process is killed;
+- fake:hog, memory taken until the process is killed, or exit 1 once it
+  holds HOG_BYTES, past any session's memory limit;
 - fake:call <server> <tool> <JSON arguments>, a call to that SDK MCP tool
   before the success result, whose result text is the tool's.
 
-It prints its arguments, the isolation variables and the names of the
-credential variables it saw to stderr, as one JSON line. It uses the
-standard library alone, since the test image holds only this file.
+It prints to stderr, as one JSON line, its arguments, the isolation
+variables, the name of every variable it saw, the processes its /proc lists
+and whether it can write its working directory. It uses the standard
+library alone, since a sandbox holds no corvo package.
 """
 
 import json
@@ -27,20 +31,26 @@ import os
 import sys
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 VERSION = "99.0.0 (fake claude)"
 SESSION_ID = "fake-session"
 
 ISOLATION = (
+    "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
     "CLAUDE_CODE_DISABLE_AUTO_MEMORY",
     "CLAUDE_CODE_DISABLE_CLAUDE_MDS",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
     "CLAUDE_CODE_SKIP_PROMPT_HISTORY",
+    "ENABLE_CLAUDEAI_MCP_SERVERS",
     "CLAUDE_CONFIG_DIR",
     "HOME",
 )
-CREDENTIALS = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+
+# Twice AGENT_MEMORY, held in steps whose pages are all written.
+HOG_BYTES = 4 << 30
+HOG_STEP = 64 << 20
 
 # The structured output of each agent's verdict schema, by its title.
 CANNED: dict[str, dict[str, Any]] = {
@@ -135,6 +145,27 @@ def call_tool(
     return "".join(part.get("text", "") for part in called["result"]["content"])
 
 
+def processes() -> list[dict[str, Any]]:
+    """Each process /proc lists, by PID and command name."""
+    listed = []
+    for entry in Path("/proc").iterdir():
+        if entry.name.isdigit():
+            try:
+                name = (entry / "comm").read_text().strip()
+            except OSError:
+                continue  # It ended while being listed.
+            listed.append({"pid": int(entry.name), "comm": name})
+    return sorted(listed, key=lambda process: process["pid"])
+
+
+def hog() -> int:
+    held: list[bytes] = []
+    while len(held) * HOG_STEP < HOG_BYTES:
+        held.append(b"x" * HOG_STEP)
+    print(f"fake claude: held {HOG_BYTES} bytes, not killed", file=sys.stderr)
+    return 1
+
+
 def main() -> int:
     if sys.argv[1:] == ["-v"]:
         print(VERSION)
@@ -142,7 +173,9 @@ def main() -> int:
     seen = {
         "argv": sys.argv[1:],
         "env": {name: os.environ.get(name) for name in ISOLATION},
-        "credentials": [name for name in CREDENTIALS if name in os.environ],
+        "names": sorted(os.environ),
+        "processes": processes(),
+        "writable": os.access(".", os.W_OK),
     }
     print(json.dumps(seen), file=sys.stderr, flush=True)
 
@@ -162,6 +195,8 @@ def main() -> int:
     if "fake:hang" in prompt:
         while True:
             time.sleep(3600)
+    if "fake:hog" in prompt:
+        return hog()
     if "fake:max-turns" in prompt:
         turns = int(option("--max-turns") or 1)
         send(result("error_max_turns", is_error=True, num_turns=turns))

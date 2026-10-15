@@ -7,6 +7,7 @@ cli_path, so a protocol change in an SDK bump fails here. Each runs under a
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from claude_agent_sdk import (
     tool,
 )
 
+from corvo.agents.session import sandbox_settings
 from corvo.agents.tone.models import ToneVerdict
 
 FAKE = Path(__file__).with_name("fake_claude.py")
@@ -64,7 +66,28 @@ async def test_a_success_carries_the_canned_structured_output() -> None:
     assert ToneVerdict.model_validate(result.structured_output).tone == "friendly"
     [seen] = [json.loads(line) for line in stderr]
     assert "--max-turns" in seen["argv"]
-    assert seen["credentials"] == []
+    assert not {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} & set(seen["names"])
+
+
+@pytest.mark.fake_cli
+async def test_the_session_s_sandbox_reaches_the_engine_s_settings(
+    tmp_path: Path,
+) -> None:
+    stderr: list[str] = []
+    options = ClaudeAgentOptions(
+        cli_path=FAKE, cwd=tmp_path, sandbox=sandbox_settings(), stderr=stderr.append
+    )
+
+    await collect("Thanks a lot!", options)
+
+    [seen] = [json.loads(line) for line in stderr]
+    argv = seen["argv"]
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["sandbox"]["failIfUnavailable"] is True
+    assert settings["sandbox"]["allowUnsandboxedCommands"] is False
+    # What the integration stack reads of the engine's surroundings.
+    assert seen["writable"] is True
+    assert os.getpid() in {process["pid"] for process in seen["processes"]}
 
 
 @pytest.mark.fake_cli
