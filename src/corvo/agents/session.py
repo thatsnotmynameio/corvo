@@ -12,8 +12,10 @@ A run succeeds only when its last result is not an error, its subtype is
 success, and its structured_output validates. Anything else raises
 AgentRunFailed, carrying what the session reported: the turn or budget
 limit (an error result, then ResultError), an API failure (a success result
-with is_error, then ResultError), a result with no structured output, or a
-CLI that fails with no error result (ProcessError), even after a success.
+with is_error, then ResultError), a result with no structured output, a
+CLI that fails with no error result (ProcessError), even after a success, or
+any other SDK failure, such as a CLI that never starts or an unreadable
+message.
 """
 
 from collections.abc import AsyncIterator, Callable
@@ -22,6 +24,7 @@ from pathlib import Path
 from typing import cast
 
 from claude_agent_sdk import (
+    ClaudeSDKError,
     Message,
     ProcessError,
     ResultMessage,
@@ -87,6 +90,8 @@ async def consume[T: BaseModel](
             raise AgentRunFailed(
                 "process_failed", report(result, session_id)
             ) from error
+    except ClaudeSDKError as error:
+        raise AgentRunFailed("sdk_error", report(result, session_id)) from error
 
     if result is None:
         raise AgentRunFailed("no_result", report(result, session_id))

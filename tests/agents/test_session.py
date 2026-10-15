@@ -1,7 +1,13 @@
 from collections.abc import AsyncIterator
 
 import pytest
-from claude_agent_sdk import Message, ProcessError, ResultError
+from claude_agent_sdk import (
+    CLIConnectionError,
+    CLIJSONDecodeError,
+    Message,
+    ProcessError,
+    ResultError,
+)
 from pydantic import BaseModel
 
 from agents.scripted import SESSION_ID, ScriptedQuery, init, result
@@ -132,3 +138,25 @@ async def test_a_session_that_ends_without_a_result_fails() -> None:
         await consume(scripted.stream(), Verdict, discard)
 
     assert failure.value.reason == "no_result"
+
+
+async def test_a_cli_that_never_starts_fails_with_an_empty_report() -> None:
+    scripted = ScriptedQuery(error=CLIConnectionError("Failed to start Claude Code"))
+
+    with pytest.raises(AgentRunFailed) as failure:
+        await consume(scripted.stream(), Verdict, discard)
+
+    assert failure.value.reason == "sdk_error"
+    assert failure.value.report == RunReport()
+
+
+async def test_an_unreadable_message_fails_and_keeps_the_session_id() -> None:
+    scripted = ScriptedQuery(
+        init(), error=CLIJSONDecodeError("{not json", ValueError("bad"))
+    )
+
+    with pytest.raises(AgentRunFailed) as failure:
+        await consume(scripted.stream(), Verdict, discard)
+
+    assert failure.value.reason == "sdk_error"
+    assert failure.value.report == RunReport(session_id=SESSION_ID)
