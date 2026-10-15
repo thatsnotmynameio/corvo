@@ -336,8 +336,8 @@ async def test_without_configuration_a_run_fails_at_once(
 async def test_disabled_agents_fail_a_run_with_the_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(containers, "state", containers.NOT_CONFIGURED)
     containers.disable("the probe's pids.max is 'max', not '256'")
-    monkeypatch.setattr(containers, "state", containers.state)
 
     with pytest.raises(AgentFailed, match="pids.max is 'max'"):
         await example.aio_mock_run(ToneInput(text="Thanks!"))

@@ -108,6 +108,11 @@ class Run:
         }
 
 
+def task_run_label(task_run_id: str) -> str:
+    """The label filter that finds every container of a task run's attempts."""
+    return f"corvo.task_run_id={task_run_id}"
+
+
 def container_spec(
     *,
     image: str,

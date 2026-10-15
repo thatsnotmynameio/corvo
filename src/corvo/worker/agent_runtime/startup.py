@@ -184,12 +184,10 @@ async def probe(client: DockerClient, settings: Settings, deployment: str) -> No
         logger.warning(open_egress)
 
 
-async def checked_runtime(
-    settings: Settings, deployment: str, status_of: StatusOf
-) -> Runtime:
-    if not settings.agent_credential:
-        raise Disabled("CORVO_AGENT_CREDENTIAL is empty")
-    client = DockerClient(base_url=f"unix://{settings.agent_podman_socket}")
+async def check(
+    client: DockerClient, settings: Settings, deployment: str, status_of: StatusOf
+) -> None:
+    """Checks the image and the probe's report, then sweeps."""
     try:
         await asyncio.to_thread(client.images.get, settings.agent_image)
     except ImageNotFound:
@@ -204,6 +202,20 @@ async def checked_runtime(
             await sweep(client, deployment, status_of)
     except TimeoutError:
         logger.warning("the sweep took longer than %s seconds", SWEEP_TIMEOUT)
+
+
+async def checked_runtime(
+    settings: Settings, deployment: str, status_of: StatusOf
+) -> Runtime:
+    if not settings.agent_credential:
+        raise Disabled("CORVO_AGENT_CREDENTIAL is empty")
+    client = DockerClient(base_url=f"unix://{settings.agent_podman_socket}")
+    try:
+        await check(client, settings, deployment, status_of)
+    except BaseException:
+        # Agents stay off, so nothing uses the client again.
+        client.close()
+        raise
     return Runtime(
         client=client,
         root=Path(settings.agent_root),

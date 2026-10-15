@@ -28,6 +28,8 @@ from corvo.worker.defaults import (
     AGENT_PIDS_LIMIT,
 )
 
+from .probe_report import matching_report
+
 RUN = Run(
     deployment="tenant@http://hatchet",
     run_id="run-1",
@@ -205,31 +207,8 @@ def test_the_budget_ends_the_margin_before_hatchets_timeout() -> None:
 
 
 def report(**changes: object) -> ProbeReport:
-    """What the probe reads in a container built by the spec."""
-    fields: dict[str, object] = {
-        "fingerprint": "f",
-        "memory_max": str(AGENT_MEMORY),
-        "cpu_max": "100000 100000",
-        "pids_max": str(AGENT_PIDS_LIMIT),
-        "cap_eff": "0000000000000000",
-        "env_names": sorted([*ISOLATION, "PATH"]),
-        "root_read_only": True,
-        "mounts": {
-            "/tmp": ["rw", "nosuid", "nodev", "noexec", "relatime", "size=102400k"],
-            "/home/agent": [
-                "rw",
-                "nosuid",
-                "nodev",
-                "noexec",
-                "relatime",
-                "size=512000k",
-            ],
-        },
-        "gateway": "10.0.2.2",
-        "gateway_reachable": False,
-        "metadata_reachable": False,
-    }
-    return ProbeReport.model_validate(fields | changes)
+    """A report that matches the spec, for a worker whose fingerprint is f."""
+    return matching_report(**{"fingerprint": "f", **changes})
 
 
 def test_a_report_that_matches_the_spec_has_no_problem() -> None:

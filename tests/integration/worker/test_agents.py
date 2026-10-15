@@ -19,7 +19,7 @@ from hatchet_sdk import ClientConfig, ClientTLSConfig, Hatchet, V1TaskStatus
 from hatchet_sdk.runnables.workflow import Standalone
 
 from corvo.agents.tone.models import ToneInput, ToneOutput
-from corvo.worker.agent_runtime.spec import MANAGED, deployment_label
+from corvo.worker.agent_runtime.spec import ENDED, MANAGED, deployment_label
 from corvo.worker.tasks.hello import HelloInput, HelloOutput
 
 from .conftest import Podman, WorkerProcess, running_worker
@@ -28,8 +28,6 @@ pytestmark = [
     pytest.mark.usefixtures("worker"),
     pytest.mark.asyncio(loop_scope="session"),
 ]
-
-DONE = {V1TaskStatus.COMPLETED, V1TaskStatus.FAILED, V1TaskStatus.CANCELLED}
 
 
 def tone_stub(hatchet: Hatchet) -> Standalone[ToneInput, ToneOutput]:
@@ -71,7 +69,7 @@ async def ended(hatchet: Hatchet, run_id: str) -> Any:
 
     async def details() -> Any:
         found = await hatchet.runs.aio_get(run_id)
-        if found.tasks and all(task.status in DONE for task in found.tasks):
+        if found.tasks and all(task.status in ENDED for task in found.tasks):
             return found
         return None
 
@@ -144,22 +142,21 @@ async def test_a_cancelled_run_leaves_no_container(
     assert task.status == V1TaskStatus.CANCELLED
 
 
-def namespaced(
-    worker_env: dict[str, str], namespace: str
-) -> tuple[dict[str, str], Callable[[Hatchet], Hatchet]]:
+def namespaced(worker_env: dict[str, str], namespace: str) -> dict[str, str]:
     """A worker environment whose tasks Hatchet names apart, so only that
-    worker serves them, and a client that triggers them."""
+    worker serves them."""
+    return {**worker_env, "HATCHET_CLIENT_NAMESPACE": namespace}
 
-    def client(hatchet: Hatchet) -> Hatchet:
-        return Hatchet(
-            config=ClientConfig(
-                token=hatchet.config.token,
-                tls_config=ClientTLSConfig(strategy="none"),
-                namespace=namespace,
-            )
+
+def namespaced_client(hatchet: Hatchet, namespace: str) -> Hatchet:
+    """A client that triggers the tasks of a namespaced worker."""
+    return Hatchet(
+        config=ClientConfig(
+            token=hatchet.config.token,
+            tls_config=ClientTLSConfig(strategy="none"),
+            namespace=namespace,
         )
-
-    return {**worker_env, "HATCHET_CLIENT_NAMESPACE": namespace}, client
+    )
 
 
 async def test_a_starting_worker_removes_only_containers_of_ended_runs(
@@ -192,7 +189,7 @@ async def test_a_starting_worker_removes_only_containers_of_ended_runs(
         ToneInput(text="fake:hang"), wait_for_result=False
     )
     [live_container] = await until(running(podman, live.workflow_run_id))
-    env, _ = namespaced(worker_env, "sweep")
+    env = namespaced(worker_env, "sweep")
 
     try:
         with running_worker(env, tmp_path / "second.log"):
@@ -215,9 +212,9 @@ async def test_sigterm_removes_the_running_containers_and_fails_their_runs(
     worker_env: dict[str, str],
     tmp_path: Path,
 ) -> None:
-    env, client = namespaced(worker_env, "sigterm")
+    env = namespaced(worker_env, "sigterm")
     with running_worker(env, tmp_path / "sigterm.log") as worker:
-        run = await tone_stub(client(hatchet)).aio_run(
+        run = await tone_stub(namespaced_client(hatchet, "sigterm")).aio_run(
             ToneInput(text="fake:hang"), wait_for_result=False
         )
         await until(running(podman, run.workflow_run_id))

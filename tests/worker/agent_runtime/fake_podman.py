@@ -138,6 +138,10 @@ class FakeClient:
         self.images = FakeImages()
         self.removals: list[str] = []
         self.lookups: list[dict[str, str]] = []
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
 
     def stray(self, **labels: str) -> FakeContainer:
         """A container another worker, or an earlier attempt, left."""

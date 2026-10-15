@@ -46,6 +46,7 @@ from corvo.worker.agent_runtime.spec import (
     check_workdir,
     container_spec,
     session_budget,
+    task_run_label,
 )
 
 # The largest envelope or probe report the worker reads.
@@ -57,6 +58,9 @@ MAX_UNTRUSTED_BYTES = 1024 * 1024
 STDERR_PREFIX = "agent stderr: "
 MAX_LINE = 500
 MAX_LINES = 900
+# A line that runs longer than this without ending is sent cut, rather than
+# held whole.
+MAX_PENDING = MAX_LINE * 4
 
 # How long cleanup may take, under a cancel or a timeout.
 CLEANUP_TIMEOUT = 30
@@ -179,7 +183,7 @@ async def remove_in_flight(runtime: Runtime) -> None:
     """Removes the containers of this worker's in-flight agent runs."""
     for task_run_id in sorted(runtime.in_flight):
         await asyncio.to_thread(
-            remove_labelled, runtime.client, f"corvo.task_run_id={task_run_id}"
+            remove_labelled, runtime.client, task_run_label(task_run_id)
         )
 
 
@@ -217,8 +221,7 @@ def forward_stderr(chunks: Iterable[bytes], log: Callable[[str], None]) -> None:
         *lines, pending = (pending + chunk).split(b"\n")
         for line in lines:
             send(line)
-        # A line that never ends is cut, rather than held whole.
-        if len(pending) > MAX_LINE * 4:
+        if len(pending) > MAX_PENDING:
             send(pending)
             pending = b""
     if pending:
@@ -323,7 +326,7 @@ async def guard_rerun(runtime: Runtime, run: Run) -> None:
     the retry count too, but its earlier attempt cleaned up after itself.
     """
     removed = await asyncio.to_thread(
-        remove_labelled, runtime.client, f"corvo.task_run_id={run.task_run_id}"
+        remove_labelled, runtime.client, task_run_label(run.task_run_id)
     )
     earlier = [
         path
@@ -435,7 +438,7 @@ async def clean_up(
     not raised: it must not hide how the run itself ended."""
     try:
         await remove_run(
-            runtime.client, f"corvo.task_run_id={run.task_run_id}", run_dir, calls
+            runtime.client, task_run_label(run.task_run_id), run_dir, calls
         )
         runtime.in_flight.discard(run.task_run_id)
     except Exception as error:

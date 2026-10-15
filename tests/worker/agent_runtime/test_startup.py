@@ -12,38 +12,16 @@ from hatchet_sdk import V1TaskStatus
 from hatchet_sdk.clients.rest.exceptions import NotFoundException
 
 from corvo.agents.envelope import ProbeReport
-from corvo.agents.fingerprint import fingerprint
 from corvo.settings import Settings
 from corvo.worker.agent_runtime import containers, startup
 from corvo.worker.agent_runtime.containers import Runtime
 from corvo.worker.agent_runtime.spec import ISOLATION_ENV, Credential
-from corvo.worker.defaults import AGENT_MEMORY, AGENT_PIDS_LIMIT
 
 from .fake_podman import Behaviour, Exit, FakeClient, FakeContainer
+from .probe_report import matching_report
 
 DEPLOYMENT = "tenant@http://hatchet"
 IMAGE = "localhost/corvo-agent:latest"
-
-
-def report(**changes: object) -> ProbeReport:
-    """What the probe reads in a container built by the spec."""
-    fields: dict[str, object] = {
-        "fingerprint": fingerprint(),
-        "memory_max": str(AGENT_MEMORY),
-        "cpu_max": "100000 100000",
-        "pids_max": str(AGENT_PIDS_LIMIT),
-        "cap_eff": "0000000000000000",
-        "env_names": sorted([*ISOLATION_ENV, "PATH"]),
-        "root_read_only": True,
-        "mounts": {
-            "/tmp": ["rw", "nosuid", "nodev", "noexec", "size=102400k"],
-            "/home/agent": ["rw", "nosuid", "nodev", "noexec", "size=512000k"],
-        },
-        "gateway": "10.0.2.2",
-        "gateway_reachable": False,
-        "metadata_reachable": False,
-    }
-    return ProbeReport.model_validate(fields | changes)
 
 
 def probing(probed: ProbeReport, code: int = 0) -> Behaviour:
@@ -56,7 +34,7 @@ def probing(probed: ProbeReport, code: int = 0) -> Behaviour:
 
 @pytest.fixture
 def podman(monkeypatch: pytest.MonkeyPatch) -> FakeClient:
-    client = FakeClient(probing(report()))
+    client = FakeClient(probing(matching_report()))
     client.images.present.add(IMAGE)
     monkeypatch.setattr(startup, "DockerClient", lambda base_url: client)
     # Each test leaves the state as it found it.
@@ -90,6 +68,7 @@ async def test_a_probe_that_matches_enables_agents(
     assert runtime.credential == Credential(kind="api_key", value="secret")
     assert runtime.deployment == DEPLOYMENT
     assert "agents are enabled" in caplog.messages
+    assert not podman.closed
 
 
 async def test_the_probe_runs_the_spec_without_a_credential(
@@ -100,7 +79,7 @@ async def test_the_probe_runs_the_spec_without_a_credential(
     def record(run_dir: Path) -> Exit:
         [container] = podman.containers.made
         specs.append(container.spec)
-        return probing(report())(run_dir)
+        return probing(matching_report())(run_dir)
 
     podman.behaviour = record
 
@@ -113,7 +92,9 @@ async def test_the_probe_runs_the_spec_without_a_credential(
     assert spec["environment"] == ISOLATION_ENV
 
 
-@pytest.mark.parametrize("probed", [report(), report(memory_max="max")])
+@pytest.mark.parametrize(
+    "probed", [matching_report(), matching_report(memory_max="max")]
+)
 async def test_the_probe_leaves_no_container_or_directory(
     podman: FakeClient, settings: Settings, probed: ProbeReport
 ) -> None:
@@ -128,9 +109,9 @@ async def test_the_probe_leaves_no_container_or_directory(
 @pytest.mark.parametrize(
     ("probed", "reason"),
     [
-        (report(memory_max="max"), "memory.max is 'max'"),
-        (report(fingerprint="stale"), "fingerprint differs"),
-        (report(cap_eff="00000000a80425fb"), "effective capabilities"),
+        (matching_report(memory_max="max"), "memory.max is 'max'"),
+        (matching_report(fingerprint="stale"), "fingerprint differs"),
+        (matching_report(cap_eff="00000000a80425fb"), "effective capabilities"),
     ],
 )
 async def test_a_probe_that_differs_disables_agents(
@@ -184,6 +165,7 @@ async def test_a_missing_image_disables_agents(
     assert isinstance(containers.state, str)
     assert f"{IMAGE} is not in the agents' Podman" in containers.state
     assert podman.containers.made == []
+    assert podman.closed
 
 
 async def test_an_empty_credential_disables_agents(
@@ -210,7 +192,7 @@ async def test_without_configuration_preparation_does_nothing(
 async def test_open_egress_disables_agents_when_its_block_is_required(
     podman: FakeClient, settings: Settings
 ) -> None:
-    podman.behaviour = probing(report(metadata_reachable=True))
+    podman.behaviour = probing(matching_report(metadata_reachable=True))
     settings.agent_require_egress_block = True
 
     await startup.prepare(settings, DEPLOYMENT, nothing_ran)
@@ -222,7 +204,7 @@ async def test_open_egress_disables_agents_when_its_block_is_required(
 async def test_open_egress_only_warns_when_its_block_is_not_required(
     podman: FakeClient, settings: Settings, caplog: pytest.LogCaptureFixture
 ) -> None:
-    podman.behaviour = probing(report(metadata_reachable=True))
+    podman.behaviour = probing(matching_report(metadata_reachable=True))
 
     await startup.prepare(settings, DEPLOYMENT, nothing_ran)
 
