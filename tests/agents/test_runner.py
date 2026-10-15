@@ -1,6 +1,10 @@
 import asyncio
+import io
 import os
 import socket
+import subprocess
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -11,10 +15,12 @@ from corvo.agents.envelope import (
     AgentRequest,
     AgentRunFailed,
     Failed,
+    ProbeReport,
     RunReport,
     Succeeded,
 )
 from corvo.agents.fingerprint import fingerprint
+from corvo.agents.frame import encode, extract
 from corvo.agents.tone import agent
 from corvo.agents.tone.models import ToneInput, ToneOutput
 
@@ -23,15 +29,18 @@ REPORT = RunReport(
 )
 
 
-def request(
-    run_dir: Path, agent: str = "tone", text: str = "Thanks!", budget: float = 5
-) -> None:
+def request(agent: str = "tone", text: str = "Thanks!", budget: float = 5) -> bytes:
     sent = AgentRequest(agent=agent, input={"text": text}, budget_seconds=budget)
-    (run_dir / "request.json").write_text(sent.model_dump_json())
+    return sent.model_dump_json().encode()
 
 
-def envelope(run_dir: Path) -> Succeeded | Failed:
-    return ENVELOPE.validate_json((run_dir / "result.json").read_bytes())
+async def executed(raw: bytes | None) -> tuple[bool, Succeeded | Failed]:
+    """Whether the run was ok, and the envelope it framed on its stdout."""
+    out = io.BytesIO()
+    ok = await runner.execute(raw, out)
+    framed = extract(out.getvalue())
+    assert framed is not None
+    return ok, ENVELOPE.validate_json(framed)
 
 
 async def succeeding(
@@ -53,93 +62,171 @@ async def hanging(
     raise AssertionError("the deadline did not fire")
 
 
-async def test_a_run_writes_an_ok_envelope_with_the_output_and_report(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_a_run_frames_an_ok_envelope_with_the_output_and_report(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(agent, "run", succeeding)
-    request(tmp_path)
 
-    ok = await runner.execute(tmp_path)
+    ok, envelope = await executed(request())
 
     assert ok
-    assert envelope(tmp_path) == Succeeded(
+    assert envelope == Succeeded(
         output={"tone": "friendly", "friendly": True}, report=REPORT
     )
 
 
-async def test_a_failed_run_writes_its_reason_and_report(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_a_failed_run_frames_its_reason_and_report(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(agent, "run", failing)
-    request(tmp_path)
 
-    ok = await runner.execute(tmp_path)
+    ok, envelope = await executed(request())
 
     assert not ok
-    assert envelope(tmp_path) == Failed(reason="error_max_turns", report=REPORT)
+    assert envelope == Failed(reason="error_max_turns", report=REPORT)
 
 
 async def test_a_run_past_its_budget_fails_with_deadline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(agent, "run", hanging)
-    request(tmp_path, budget=0.05)
 
-    await runner.execute(tmp_path)
+    _, envelope = await executed(request(budget=0.05))
 
-    assert envelope(tmp_path) == Failed(reason="deadline", report=RunReport())
+    assert envelope == Failed(reason="deadline", report=RunReport())
 
 
-async def test_the_envelope_replaces_the_file_by_a_rename(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+async def test_a_package_that_does_not_exist_fails_the_run() -> None:
+    _, envelope = await executed(request(agent="nope"))
+
+    assert envelope == Failed(reason="unknown_agent", report=RunReport())
+
+
+async def test_a_package_outside_corvo_agents_is_refused() -> None:
+    raw = b'{"agent": "tone.agent", "input": {}, "budget_seconds": 5}'
+
+    _, envelope = await executed(raw)
+
+    assert envelope == Failed(reason="invalid_request", report=RunReport())
+
+
+@pytest.mark.parametrize("raw", [None, b"not json"])
+async def test_a_request_that_did_not_arrive_or_is_invalid_fails_the_run(
+    raw: bytes | None,
 ) -> None:
-    monkeypatch.setattr(agent, "run", succeeding)
-    request(tmp_path)
-    (tmp_path / "result.json").write_text("old")
-    # A second name for the old file: a write in place would change it too.
-    os.link(tmp_path / "result.json", tmp_path / "observer")
+    _, envelope = await executed(raw)
 
-    await runner.execute(tmp_path)
-
-    assert (tmp_path / "observer").read_text() == "old"
-    assert isinstance(envelope(tmp_path), Succeeded)
-    assert sorted(path.name for path in tmp_path.iterdir()) == [
-        "observer",
-        "request.json",
-        "result.json",
-    ]
+    assert envelope == Failed(reason="invalid_request", report=RunReport())
 
 
-async def test_a_package_that_does_not_exist_fails_the_run(tmp_path: Path) -> None:
-    request(tmp_path, agent="nope")
+async def test_an_input_the_agent_rejects_fails_the_run() -> None:
+    _, envelope = await executed(request(text=""))
 
-    await runner.execute(tmp_path)
-
-    assert envelope(tmp_path) == Failed(reason="unknown_agent", report=RunReport())
+    assert envelope == Failed(reason="invalid_input", report=RunReport())
 
 
-async def test_a_package_outside_corvo_agents_is_refused(tmp_path: Path) -> None:
-    (tmp_path / "request.json").write_text(
-        '{"agent": "tone.agent", "input": {}, "budget_seconds": 5}'
+@pytest.fixture
+def stdin() -> Iterator[tuple[int, int]]:
+    """A pipe whose read end stands for the runner's stdin."""
+    read_end, write_end = os.pipe()
+    yield read_end, write_end
+    os.close(read_end)
+    try:
+        os.close(write_end)
+    except OSError:
+        pass
+
+
+def is_null(fd: int) -> bool:
+    return os.fstat(fd).st_rdev == os.stat(os.devnull).st_rdev
+
+
+def test_the_request_is_read_from_its_frame_and_stdin_then_closed(
+    stdin: tuple[int, int],
+) -> None:
+    read_end, write_end = stdin
+    os.write(write_end, encode(request()) + b"late bytes")
+
+    assert runner.read_request(read_end) == request()
+    assert is_null(read_end)
+
+
+@pytest.mark.parametrize(
+    "sent",
+    [
+        # Covers AE2: the header promises more bytes than arrive.
+        b"100\n" + request(),
+        b"x" + encode(request()),
+        b"%d\n" % (1024 * 1024 + 1),
+        b"",
+    ],
+)
+def test_a_request_that_does_not_arrive_whole_is_none(
+    stdin: tuple[int, int],
+    monkeypatch: pytest.MonkeyPatch,
+    capfd: pytest.CaptureFixture[str],
+    sent: bytes,
+) -> None:
+    monkeypatch.setattr(runner, "REQUEST_READ_TIMEOUT", 0.2)
+    read_end, write_end = stdin
+    os.write(write_end, sent)
+
+    assert runner.read_request(read_end) is None
+    assert is_null(read_end)
+    # The reason names sizes at most, never the request.
+    err = capfd.readouterr().err
+    assert "invalid request" in err
+    assert "Thanks" not in err
+
+
+# The runner's main, with the outcome a stand-in that prints to stdout, as
+# the CLI or a library might.
+NOISY_MAIN = """
+import os, sys
+from corvo.agents import runner
+from corvo.agents.envelope import Failed, RunReport
+
+async def noisy(raw):
+    print("printed")
+    os.write(1, b"written to fd 1\\n")
+    return Failed(reason=raw.decode(), report=RunReport())
+
+runner.outcome = noisy
+sys.argv = ["corvo-agent", "run"]
+sys.exit(runner.main())
+"""
+
+
+def test_only_the_envelope_reaches_the_runners_stdout() -> None:
+    ran = subprocess.run(
+        [sys.executable, "-c", NOISY_MAIN],
+        input=encode(b"from-stdin"),
+        capture_output=True,
+        timeout=30,
     )
 
-    await runner.execute(tmp_path)
+    assert ran.returncode == 1
+    framed = extract(ran.stdout)
+    assert framed is not None
+    assert ran.stdout == encode(framed)
+    assert ENVELOPE.validate_json(framed) == Failed(
+        reason="from-stdin", report=RunReport()
+    )
+    assert b"printed" in ran.stderr
+    assert b"written to fd 1" in ran.stderr
 
-    assert envelope(tmp_path) == Failed(reason="invalid_request", report=RunReport())
 
+def test_the_probe_frames_its_report_on_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner, "reaches", lambda address: False)
+    out = io.BytesIO()
 
-async def test_a_missing_request_fails_the_run(tmp_path: Path) -> None:
-    await runner.execute(tmp_path)
+    runner.send(out, runner.probe(fake_root(tmp_path)))
 
-    assert envelope(tmp_path) == Failed(reason="invalid_request", report=RunReport())
-
-
-async def test_an_input_the_agent_rejects_fails_the_run(tmp_path: Path) -> None:
-    request(tmp_path, text="")
-
-    await runner.execute(tmp_path)
-
-    assert envelope(tmp_path) == Failed(reason="invalid_input", report=RunReport())
+    framed = extract(out.getvalue())
+    assert framed is not None
+    assert ProbeReport.model_validate_json(framed).cpu_max == "100000 100000"
 
 
 ROUTE = (

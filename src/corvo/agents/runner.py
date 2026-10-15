@@ -1,15 +1,19 @@
 """corvo-agent, the entrypoint of every agent container.
 
-`corvo-agent run` reads the AgentRequest the worker wrote to request.json in
-the run directory, imports corvo.agents.<agent>.agent, validates the input
-with the model run's input parameter declares, and awaits run under the
-session budget. It then writes the envelope to result.json, by a rename, so
-the worker never reads half of one. Every failure it can name becomes a
-failed envelope; a crash leaves none, which the worker reports with the
-container's exit code.
+`corvo-agent run` reads the AgentRequest the worker framed on its stdin,
+under REQUEST_READ_TIMEOUT, then points stdin at /dev/null. It imports
+corvo.agents.<agent>.agent, validates the input with the model run's input
+parameter declares, and awaits run under the session budget. It then
+writes the envelope, framed, to its stdout. Every failure it can name
+becomes a failed envelope; a crash leaves none, which the worker reports
+with the container's exit code.
 
-`corvo-agent probe` writes what it reads inside its container to probe.json,
-for the worker's startup check (KTD10).
+`corvo-agent probe` frames what it reads inside its container on its
+stdout, for the worker's startup check (KTD10).
+
+Only the frame reaches the real stdout: main first moves it to a private
+descriptor, which no child inherits, and points fd 1 at stderr, so nothing
+the CLI, a tool or a library prints can corrupt or forge the frame.
 
 The entrypoint sits outside the agent: the agent calls its SDK itself.
 """
@@ -19,9 +23,10 @@ import asyncio
 import os
 import socket
 import struct
+import sys
 from importlib import import_module
 from pathlib import Path
-from typing import get_type_hints
+from typing import BinaryIO, get_type_hints
 
 from pydantic import BaseModel, ValidationError
 
@@ -34,31 +39,43 @@ from corvo.agents.envelope import (
     Succeeded,
 )
 from corvo.agents.fingerprint import fingerprint
+from corvo.agents.frame import FrameError, encode, read_frame
 
-# Where the container spec mounts the run directory.
-RUN_DIR = Path("/corvo/run")
+# How long the request may take to arrive: below the worker's own bound on
+# its write, so a run that reports an invalid request is not cut off.
+REQUEST_READ_TIMEOUT = 30
 
 # The cloud metadata address, which the production nftables rule blocks.
 METADATA_ADDRESS = "169.254.169.254"
 PROBE_PORT = 80
 
 
-def write(path: Path, model: BaseModel) -> None:
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(model.model_dump_json())
-    temporary.replace(path)
+def send(out: BinaryIO, model: BaseModel) -> None:
+    out.write(encode(model.model_dump_json().encode()))
+    out.flush()
 
 
-async def outcome(run_dir: Path) -> Succeeded | Failed:
+def read_request(fd: int = 0) -> bytes | None:
+    """The request framed on <fd>, or None when it does not arrive whole.
+    Then <fd> points at /dev/null, so neither the CLI nor a tool can read
+    late bytes or hold the channel."""
     try:
-        request = AgentRequest.model_validate_json(
-            (run_dir / "request.json").read_bytes()
-        )
-    # Two clauses, not one with two types: the organization's coverage check
-    # parses this file with a Python older than 3.14, which needs parentheses
-    # there, and ruff removes them for 3.14.
-    except OSError:
+        return read_frame(fd, REQUEST_READ_TIMEOUT)
+    except FrameError as error:
+        # The reason names sizes at most, never the request.
+        print(f"corvo-agent: invalid request: {error}", file=sys.stderr)
+        return None
+    finally:
+        null = os.open(os.devnull, os.O_RDONLY)
+        os.dup2(null, fd)
+        os.close(null)
+
+
+async def outcome(raw: bytes | None) -> Succeeded | Failed:
+    if raw is None:
         return Failed(reason="invalid_request", report=RunReport())
+    try:
+        request = AgentRequest.model_validate_json(raw)
     except ValidationError:
         return Failed(reason="invalid_request", report=RunReport())
 
@@ -90,10 +107,11 @@ async def outcome(run_dir: Path) -> Succeeded | Failed:
     return Succeeded(output=output.model_dump(mode="json"), report=report)
 
 
-async def execute(run_dir: Path) -> bool:
-    """Run the requested agent and write its envelope: True when it is ok."""
-    envelope = await outcome(run_dir)
-    write(run_dir / "result.json", envelope)
+async def execute(raw: bytes | None, out: BinaryIO) -> bool:
+    """Run the requested agent and frame its envelope on out: True when it
+    is ok."""
+    envelope = await outcome(raw)
+    send(out, envelope)
     return isinstance(envelope, Succeeded)
 
 
@@ -150,10 +168,13 @@ def probe(root: Path = Path("/")) -> ProbeReport:
 
 
 def main() -> int:
+    # The real stdout, for the frame alone; fd 1 now writes to stderr.
+    out = os.fdopen(os.dup(1), "wb")
+    os.dup2(2, 1)
     parser = argparse.ArgumentParser(prog="corvo-agent")
     parser.add_argument("command", choices=["run", "probe"])
     command = parser.parse_args().command
     if command == "probe":
-        write(RUN_DIR / "probe.json", probe())
+        send(out, probe())
         return 0
-    return 0 if asyncio.run(execute(RUN_DIR)) else 1
+    return 0 if asyncio.run(execute(read_request(), out)) else 1
