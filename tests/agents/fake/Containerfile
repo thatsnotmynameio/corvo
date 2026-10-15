@@ -1,0 +1,19 @@
+# The agent image with tests/agents/fake_claude.py in place of the claude CLI
+# the SDK bundles, for the tests that run agents in containers. Its build
+# context holds only the fake: copy fake_claude.py next to this file in a
+# scratch directory, and build there with
+# `podman build --build-arg AGENT_IMAGE=<the agent image> <that directory>`.
+ARG AGENT_IMAGE=localhost/corvo-agent:latest
+FROM ${AGENT_IMAGE}
+
+COPY fake_claude.py /tmp/fake_claude.py
+
+# Overwrite the CLI the SDK itself finds, then check that what it finds now
+# answers as the fake does.
+RUN cli="$(python -c 'from claude_agent_sdk import ClaudeAgentOptions; from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport; print(SubprocessCLITransport("", ClaudeAgentOptions())._find_cli())')" \
+    && install -m 0755 /tmp/fake_claude.py "$cli" \
+    && rm /tmp/fake_claude.py \
+    && test "$("$cli" -v)" = "99.0.0 (fake claude)"
+
+# Should the overwrite ever miss, the CLI still cannot reach Claude.
+ENV ANTHROPIC_BASE_URL=http://127.0.0.1:9
