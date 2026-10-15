@@ -3,6 +3,8 @@ name = "corvo"
 version = "0.1.0"
 description = "corvo's API."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Matheus Guilarducci", email = "mguilarducci@gmail.com" }
 ]
