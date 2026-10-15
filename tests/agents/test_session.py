@@ -3,7 +3,7 @@ from claude_agent_sdk import ProcessError, ResultError
 from pydantic import BaseModel
 
 from agents.scripted import SESSION_ID, ScriptedQuery, init, result
-from corvo.agents.envelope import AgentRunFailed, RunReport
+from corvo.agents.report import AgentRunFailed, RunReport
 from corvo.agents.session import consume
 
 

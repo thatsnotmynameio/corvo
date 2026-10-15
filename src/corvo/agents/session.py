@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from claude_agent_sdk import Message, ProcessError, ResultMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
-from corvo.agents.envelope import AgentRunFailed, RunReport
+from corvo.agents.report import AgentRunFailed, RunReport
 
 
 async def consume[T: BaseModel](

@@ -36,7 +36,7 @@ from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, query
 
-from corvo.agents.envelope import RunReport
+from corvo.agents.report import RunReport
 from corvo.agents.session import consume
 from corvo.agents.tone.models import ToneInput, ToneOutput, ToneVerdict
 from corvo.core.agents.tone import is_friendly

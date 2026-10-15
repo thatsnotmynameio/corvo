@@ -3,7 +3,7 @@ from claude_agent_sdk import ResultError
 
 from agents.isolation import assert_isolated
 from agents.scripted import SESSION_ID, ScriptedQuery, init, result
-from corvo.agents.envelope import AgentRunFailed, RunReport
+from corvo.agents.report import AgentRunFailed, RunReport
 from corvo.agents.tone import agent
 from corvo.agents.tone.models import ToneInput, ToneOutput, ToneVerdict
 
