@@ -23,7 +23,7 @@ deepened: 2026-10-15
   - the bundled `claude` CLI fails under KTD6's read-only root and `noexec` tmpfs in a manual proof, and `CLAUDE_CODE_TMPDIR` on an exec-allowed tmpfs does not fix it;
   - engine v0.110.5 rejects KTD9's tenant-scoped named concurrency strategy;
   - CI's 90% coverage floor cannot be held without excluding code.
-- **Finishes and ships:** a `gh stack` stack, one layer per unit (Delivery, below), whose bottom layer is `docs/agents-skeleton-plan`, holding this plan.
+- **Finishes and ships:** a `gh stack` stack, one layer per unit, each built from its part plan (Split into parts, below), whose bottom layer is `docs/agents-skeleton-plan`, holding the plans.
 - **Open blockers:** none.
 
 ---
@@ -898,18 +898,18 @@ For a failing or stuck run, `skills/hatchet-cli/references/debug-run.md` and `tr
 
 ---
 
-## Delivery
+## Split into parts
 
-The units ship as one `gh stack` stack, bottom to top. The bottom layer is `docs/agents-skeleton-plan`, holding this plan, and each unit gets one branch above it.
+Each unit has its own plan, built to be enough on its own to deliver that unit; this file stays the whole picture. The parts ship as one `gh stack` stack, bottom to top: `docs/agents-skeleton-plan` (the plans), then one branch per part.
 
-| Unit | Branch | Depends on |
-|---|---|---|
-| U1 | `feat/agents-u1-podman-fixture` | none |
-| U2 | `feat/agents-u2-boundaries` | none |
-| U3 | `feat/agents-u3-tone-agent` | U2 |
-| U4 | `feat/agents-u4-container-piece` | U1, U3 |
-| U5 | `feat/agents-u5-operations` | U4 |
-| U6 | `feat/agents-u6-dir-summary` | U4 |
-| U7 | `feat/agents-u7-dir-review` | U6 |
+| Part | Plan | Branch | Depends on |
+|---|---|---|---|
+| U1 rootless Podman fixture | `docs/plans/2026-10-15-0020-feat-agents-skeleton-u1-podman-fixture-plan.md` | `feat/agents-u1-podman-fixture` | none |
+| U2 boundaries, settings and guard | `docs/plans/2026-10-15-0020-feat-agents-skeleton-u2-boundaries-plan.md` | `feat/agents-u2-boundaries` | none |
+| U3 `tone` agent and entrypoint | `docs/plans/2026-10-15-0020-feat-agents-skeleton-u3-tone-agent-plan.md` | `feat/agents-u3-tone-agent` | U2 |
+| U4 container piece and `tone` task | `docs/plans/2026-10-15-0020-feat-agents-skeleton-u4-container-piece-plan.md` | `feat/agents-u4-container-piece` | U1, U3 |
+| U5 operations | `docs/plans/2026-10-15-0020-feat-agents-skeleton-u5-operations-plan.md` | `feat/agents-u5-operations` | U4 |
+| U6 `dir-summary` agent | `docs/plans/2026-10-15-0020-feat-agents-skeleton-u6-dir-summary-plan.md` | `feat/agents-u6-dir-summary` | U4 |
+| U7 `dir-review` workflow | `docs/plans/2026-10-15-0020-feat-agents-skeleton-u7-dir-review-plan.md` | `feat/agents-u7-dir-review` | U6 |
 
 The stack is linear in the order of the table. U2 sits above U1 even though it does not depend on it, so that U1's CI proof lands first.
