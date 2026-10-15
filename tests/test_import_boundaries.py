@@ -1,21 +1,50 @@
 """The agents' import boundaries hold across every module in corvo.
 
 Only corvo.agents imports the Claude Agent SDK, and it imports neither
-Hatchet nor the worker; the worker reaches no corvo module that imports the
-SDK; corvo.core imports neither corvo.agents nor the SDK. Ruff cannot check
-this: corvo.worker and corvo.server.api ignore its TID251 bans wholesale, and
-CI reads no nested ruff config. This test parses each module's imports and
-names every module that crosses a boundary, and the import that does.
+Hatchet nor the worker; corvo.core imports neither corvo.agents nor the SDK;
+the main profile, and the server, reach neither the agent worker's side nor
+a module that imports the SDK; the sandbox wrapper imports only the standard
+library. Ruff cannot check this: corvo.worker and corvo.server.api ignore its
+TID251 bans wholesale, and CI reads no nested ruff config. This test parses
+each module's imports and names every module that crosses a boundary, and
+the import that does.
 """
 
 import ast
+import sys
 from collections import deque
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+import pytest
+
 import corvo
 
 SDK = "claude_agent_sdk"
+
+# The main profile's modules, which reach agents only through stubs, and the
+# server, which will trigger them through the same stubs. The agents
+# profile's modules are imported by name, so nothing here reaches them.
+MAIN_PROFILE = (
+    "corvo.worker.worker",
+    "corvo.worker.profiles",
+    "corvo.worker.profiles.main",
+)
+MAIN_PROFILE_AREAS = (
+    "corvo.worker.tasks",
+    "corvo.worker.workflows",
+    "corvo.worker.agent_calls",
+    "corvo.server",
+)
+# The agent worker's side, which reaches the SDK through corvo.agents.
+AGENT_SIDE = (
+    "corvo.worker.agents",
+    "corvo.worker.agent_runtime",
+    "corvo.worker.profiles.agents",
+)
+
+# It runs as the wrapper process before joining its cgroup (KTD20).
+SANDBOX = "corvo.worker.agent_runtime.sandbox"
 
 type Imports = dict[str, set[str]]
 
@@ -92,9 +121,16 @@ def internal_edges(names: Iterable[str], modules: Iterable[str]) -> set[str]:
     }
 
 
-def chain_to_sdk(start: str, edges: Imports, direct: Imports) -> list[str] | None:
-    """The shortest import chain from start to another corvo module that
-    imports the SDK, or None when there is none."""
+def on_main_profile(module: str) -> bool:
+    return module in MAIN_PROFILE or any(
+        within(module, area) for area in MAIN_PROFILE_AREAS
+    )
+
+
+def chain_to_agents(start: str, edges: Imports, direct: Imports) -> list[str] | None:
+    """The shortest import chain from start to a module on the agent worker's
+    side or another corvo module that imports the SDK, or None when there is
+    none."""
     previous: dict[str, str] = {}
     queue = deque([start])
     seen = {start}
@@ -105,7 +141,9 @@ def chain_to_sdk(start: str, edges: Imports, direct: Imports) -> list[str] | Non
                 continue
             seen.add(target)
             previous[target] = current
-            if any(within(name, SDK) for name in direct[target]):
+            if any(within(target, side) for side in AGENT_SIDE) or any(
+                within(name, SDK) for name in direct[target]
+            ):
                 chain = [target]
                 while chain[-1] != start:
                     chain.append(previous[chain[-1]])
@@ -155,13 +193,27 @@ def problems(sources: Mapping[str, str]) -> list[str]:
                     banned,
                     "corvo.core imports neither corvo.agents nor the SDK",
                 )
-        if within(module, "corvo.worker"):
-            chain = chain_to_sdk(module, edges, direct)
+        if on_main_profile(module):
+            chain = chain_to_agents(module, edges, direct)
             if chain is not None:
                 found.append(
-                    f"{module} reaches the Claude Agent SDK through "
-                    f"{' -> '.join(chain)}: the worker imports only corvo.agents "
+                    f"{module} reaches the agents through {' -> '.join(chain)}: "
+                    "the main profile reaches agents only through "
+                    "corvo.worker.agent_calls' stubs, and imports only corvo.agents "
                     "modules that do not import the SDK, such as its models"
+                )
+        # The sandbox, and each package above it, whose __init__ runs first.
+        if within(SANDBOX, module):
+            outside = sorted(
+                name
+                for name in names
+                if name.split(".")[0] not in sys.stdlib_module_names
+            )
+            if outside:
+                found.append(
+                    f"{module} imports {outside[0]}: {SANDBOX} runs before it "
+                    "joins its cgroup, so it and the packages above it import only "
+                    "the standard library"
                 )
     return found
 
@@ -217,10 +269,10 @@ def test_an_agent_importing_the_worker_package_by_name_is_named() -> None:
     ]
 
 
-def test_the_worker_importing_sdk_free_models_is_allowed() -> None:
+def test_the_stubs_importing_sdk_free_models_is_allowed() -> None:
     found = problems(
         {
-            "corvo.worker.agents.x": "from corvo.agents.x.models import Out\n",
+            "corvo.worker.agent_calls": "from corvo.agents.x.models import Out\n",
             "corvo.agents.x.models": "from pydantic import BaseModel\n",
         }
     )
@@ -228,38 +280,105 @@ def test_the_worker_importing_sdk_free_models_is_allowed() -> None:
     assert found == []
 
 
-def test_the_worker_reaching_the_sdk_through_models_names_the_chain() -> None:
+REACHES_THE_AGENTS = (
+    "the main profile reaches agents only through corvo.worker.agent_calls' "
+    "stubs, and imports only corvo.agents modules that do not import the SDK, "
+    "such as its models"
+)
+
+
+def test_the_main_profile_reaching_the_sdk_through_models_names_the_chain() -> None:
     found = problems(
         {
-            "corvo.worker.agents.x": "from corvo.agents.x.models import Out\n",
+            "corvo.worker.agent_calls": "from corvo.agents.x.models import Out\n",
             "corvo.agents.x.models": "import corvo.agents.x.agent\n",
             "corvo.agents.x.agent": "from claude_agent_sdk import query\n",
         }
     )
 
     assert found == [
-        "corvo.worker.agents.x reaches the Claude Agent SDK through "
-        "corvo.worker.agents.x -> corvo.agents.x.models -> corvo.agents.x.agent: "
-        "the worker imports only corvo.agents modules that do not import the SDK, "
-        "such as its models"
+        "corvo.worker.agent_calls reaches the agents through "
+        "corvo.worker.agent_calls -> corvo.agents.x.models -> corvo.agents.x.agent: "
+        f"{REACHES_THE_AGENTS}"
     ]
 
 
 def test_a_package_init_on_the_way_counts() -> None:
     found = problems(
         {
-            "corvo.worker.agents.x": "import corvo.agents.x.models\n",
+            "corvo.worker.agent_calls": "import corvo.agents.x.models\n",
             "corvo.agents.x": "from claude_agent_sdk import query\n",
             "corvo.agents.x.models": "",
         }
     )
 
     assert found == [
-        "corvo.worker.agents.x reaches the Claude Agent SDK through "
-        "corvo.worker.agents.x -> corvo.agents.x: "
-        "the worker imports only corvo.agents modules that do not import the SDK, "
-        "such as its models"
+        "corvo.worker.agent_calls reaches the agents through "
+        f"corvo.worker.agent_calls -> corvo.agents.x: {REACHES_THE_AGENTS}"
     ]
+
+
+AGENT_TASK = {
+    "corvo.worker.agents.y": "import corvo.agents.y.agent\n",
+    "corvo.agents.y.agent": "from claude_agent_sdk import query\n",
+}
+
+
+@pytest.mark.parametrize("module", ["corvo.worker.workflows.x", "corvo.server.api.x"])
+def test_the_main_profile_importing_an_agent_task_is_named(module: str) -> None:
+    found = problems({module: "import corvo.worker.agents.y\n", **AGENT_TASK})
+
+    assert found == [
+        f"{module} reaches the agents through {module} -> corvo.worker.agents.y: "
+        f"{REACHES_THE_AGENTS}"
+    ]
+
+
+def test_an_agent_task_reaching_the_sdk_is_allowed() -> None:
+    assert problems(AGENT_TASK) == []
+
+
+def test_the_worker_importing_the_agents_profile_is_named() -> None:
+    found = problems(
+        {
+            "corvo.worker.worker": "import corvo.worker.profiles.agents\n",
+            "corvo.worker.profiles": "",
+            "corvo.worker.profiles.agents": "",
+        }
+    )
+
+    assert found == [
+        "corvo.worker.worker reaches the agents through "
+        f"corvo.worker.worker -> corvo.worker.profiles.agents: {REACHES_THE_AGENTS}"
+    ]
+
+
+SANDBOX_RULE = (
+    "corvo.worker.agent_runtime.sandbox runs before it joins its cgroup, so it "
+    "and the packages above it import only the standard library"
+)
+
+
+@pytest.mark.parametrize("imported", ["corvo.worker.defaults", "pydantic"])
+def test_the_sandbox_importing_beyond_the_standard_library_is_named(
+    imported: str,
+) -> None:
+    found = problems({"corvo.worker.agent_runtime.sandbox": f"import {imported}\n"})
+
+    assert found == [
+        f"corvo.worker.agent_runtime.sandbox imports {imported}: {SANDBOX_RULE}"
+    ]
+
+
+def test_a_package_above_the_sandbox_importing_beyond_it_is_named() -> None:
+    found = problems(
+        {
+            "corvo.worker": "import hatchet_sdk\n",
+            "corvo.worker.agent_runtime.sandbox": "import json\nimport os.path\n",
+        }
+    )
+
+    assert found == [f"corvo.worker imports hatchet_sdk: {SANDBOX_RULE}"]
 
 
 def test_core_importing_the_agents_is_named() -> None:
