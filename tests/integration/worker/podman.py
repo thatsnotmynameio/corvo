@@ -72,9 +72,11 @@ def describe_podman(env: dict[str, str]) -> str:
         ).stdout
     )
     host = info["host"]
+    # Podman 4 does not report its rootless network command; 5 added it.
+    network = host.get("rootlessNetworkCmd", "unreported")
     return (
         f"podman {info['version']['Version']}, network "
-        f"{host['networkBackend']}/{host['rootlessNetworkCmd']}, cgroups "
+        f"{host['networkBackend']}/{network}, cgroups "
         f"{host['cgroupVersion']} through {host['cgroupManager']}"
     )
 
