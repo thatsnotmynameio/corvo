@@ -13,18 +13,10 @@ deepened: 2026-10-15
 
 ## Goal Capsule
 
-- **Objective:** Adding an AI agent to corvo means copying a living example, filling it in, adding one line to the worker and writing its tests. The agent runs isolated in a container of its own from the first run.
-- **Means:** the Claude Agent SDK, used with its own API in a Hatchet-free `corvo.agents` package (KTD1). A thin Hatchet task starts each run in a fresh container on rootless Podman through docker-py (KTD5, KTD8).
-- **Product authority:** the repository owner, who settled every decision recorded under Key Decisions and every labeled Key Technical Decision. The Product Contract wins on behavior; a KTD wins on mechanism within its cited requirements.
-- **Execution profile:** seven units in dependency order, each landing as one commit with the tests that prove it. U1 runs first because it proves, on the CI runner, the environment every later unit depends on.
-- **Stop conditions:** stop and ask when any of these holds:
-  - rootless Podman on the GitHub runner cannot apply memory, CPU and process limits, even with the CI-only `sudo` branch of KTD15;
-  - Podman's Docker-compatible API on 4.9.3 or 6.1 rejects or silently drops a field of KTD6's container spec;
-  - the bundled `claude` CLI fails under KTD6's read-only root and `noexec` tmpfs in a manual proof, and `CLAUDE_CODE_TMPDIR` on an exec-allowed tmpfs does not fix it;
-  - engine v0.110.5 rejects KTD9's tenant-scoped named concurrency strategy;
-  - CI's 90% coverage floor cannot be held without excluding code.
-- **Finishes and ships:** a `gh stack` stack, one layer per unit, each built from its part plan (Split into parts, below), whose bottom layer is `docs/agents-skeleton-plan`, holding the plans.
-- **Open blockers:** none.
+- **Objective:** Adding an AI agent to corvo means copying a living example, filling it in, adding one line to the agent worker and writing its tests. From its first run, an agent whose shell commands follow a prompt injection cannot reach corvo's credentials, other runs, the host or the outside world.
+- **Means:** the Claude Agent SDK, used with its own API in a Hatchet-free `corvo.agents` package. A thin Hatchet task on a dedicated agent worker runs each session with the SDK's engine in a bubblewrap sandbox of its own, the SDK's sandbox around every shell command, and the Claude credential held by a proxy outside.
+- **Product authority:** the repository owner, who settled every decision recorded under Key Decisions. The Product Contract wins on behavior; a KTD wins on mechanism within its cited requirements.
+- **Open blockers:** the Planning Contract, Implementation Units, Verification Contract, Definition of Done and the part plans (`docs/plans/2026-10-15-0020-feat-agents-skeleton-u1-podman-fixture-plan.md` to `docs/plans/2026-10-15-0020-feat-agents-skeleton-u7-dir-review-plan.md`) still describe per-run Podman containers. They must be planned again against this Product Contract before any implementation. `docs/plans/2026-10-15-1030-fix-agent-request-stdin-plan.md` is superseded with them.
 
 ---
 
@@ -32,15 +24,17 @@ deepened: 2026-10-15
 
 ### Summary
 
-`corvo.agents` gets one package per agent, written with the Claude Agent SDK's own API and blind to Hatchet. Its SDK-independent logic lives in a mirrored `corvo.core.agents` module. Each agent has a thin Hatchet task in `corvo.worker.agents`. The task starts a fresh, hardened container for each run on a rootless Podman of its own, reads the agent's structured output and removes the container. Three living examples show each shape. Other SDKs come later as agents written with their own native APIs.
+`corvo.agents` gets one package per agent, written with the Claude Agent SDK's own API and blind to Hatchet. Its SDK-independent logic lives in a mirrored `corvo.core.agents` module. Each agent has a thin Hatchet task that runs only on a dedicated agent worker. The task runs each session with the SDK's engine in a fresh bubblewrap sandbox bounded by its own cgroup. Inside, the SDK's own sandbox isolates every shell command, and a proxy outside holds the Claude credential. Three living examples show each shape. Other SDKs come later as agents written with their own native APIs.
 
-The plan builds this whole contract, plus what operating it needs: a dedicated agent image built from the repository's `Dockerfile`, a compose overlay that switches agents on, and the repository's first operations doc, which covers provisioning and the manual Haiku proofs.
+The plan builds this whole contract, plus what operating it needs: the agent worker's compose service and container settings, the credential proxy, and the repository's first operations doc, which covers the manual Haiku proofs.
 
 ### Problem Frame
 
 corvo's workflows track will hand steps to agents: crew's own agents (product-manager, claude-developer) already plan, split and relate issues headless in a worktree. Today nothing in corvo says where an agent goes, what shape it takes, or how it meets Hatchet. The first agent would invent all three, and every later one would copy whatever it chose.
 
-Where the agent runs matters as much as its shape. An agent with Bash inside the worker's container sees the worker's environment: the Hatchet token, the database password and the Claude credential. Hatchet provides no sandboxing and leaves it to infrastructure, so corvo has to decide it.
+Where the agent runs matters as much as its shape. Every agent corvo plans will have Bash, and an agent with Bash in the worker's process sees the worker's environment: the Hatchet token, the database password and the Claude credential. Hatchet provides no sandboxing and leaves it to infrastructure, so corvo has to decide it.
+
+A first design ran each session in a fresh rootless-Podman container driven from the worker. Each review round found another hole in it: a group-readable request file, then a result that any process in the container could forge, then the Claude credential in every child process's environment. Measured on 2026-10-15, a child process in that container wrote a forged result through `/proc/1/fd/1`, which the container's init held open, and the forgery reached the worker before the real result. Each fix added transport code over the container's streams, and the host still needed a Podman of its own.
 
 The tasks and workflows skeleton (`docs/plans/2026-10-14-1724-feat-worker-tasks-workflows-skeleton-plan.md`) solved the same problem for Hatchet code with living examples, mirrored core twins, explicit registration and an import rule. This work does the same for agents.
 
@@ -51,14 +45,17 @@ The tasks and workflows skeleton (`docs/plans/2026-10-14-1724-feat-worker-tasks-
 - **Agent code lives in its own Hatchet-free package; the worker keeps only a thin task.** (session-settled: user-directed — chosen over an agents area inside `corvo.worker` that imports the SDK next to Hatchet.) Governs R1, R2, R6.
 - **One package per agent, with `agent.py` and `prompts/`, plus `tools.py` when the agent has custom tools, mirrored by a core twin.** These are the names Google ADK, Anthropic's Agent SDK cookbooks and demos, and Hatchet's agent examples use. (session-settled: user-approved — chosen over a prompt held as a constant in code, and over SDK-named files such as `agent_claude.py`.) Governs R1, R3.
 - **Prompts live with the agent, not in the core.** A prompt is tuned to its SDK and model. The core holds only logic that survives an SDK change. (session-settled: user-approved — chosen over prompts in the core: a prompt is tuned to its SDK and model.) Governs R1, R3.
-- **Each run executes in a fresh, hardened container.** It keeps a prompt-injected agent away from the worker's credentials. Following the Agent SDK's own docs, the whole agent runs inside the boundary, not just its commands. (session-settled: user-directed — chosen over running the agent as a subprocess of the worker, and over the SDK's built-in sandbox.) Governs R13, R15, R17.
-- **Rootless Podman under a dedicated host user, with its socket mounted into the worker's container.** The worker stays a compose service. (session-settled: user-directed — chosen over the host's `docker.sock` (a compromised worker is host root), the worker running on the host, Docker-in-Docker and a hosted sandbox.) (session-settled: user-approved — Podman chosen over rootless Docker: it runs beside the compose stack's rootful Docker on its documented path, GitLab Runner documents the same setup, and the CI runner ships it.) Governs R14.
+- **Each session's SDK engine runs in a fresh bubblewrap sandbox, and the SDK's sandbox with its credential scrub isolates every shell command inside it.** Measured together, the two layers stopped every escape a scripted shell command tried; either layer alone left some open. (session-settled: user-directed — chosen over the per-run Podman container, which left the forged result open, and over the SDK's sandbox alone, which leaves the worker's environment within every command's reach.) Governs R14, R15, R17, R26.
+- **bubblewrap for both layers.** The SDK's sandbox already depends on it, and Flatpak, Claude Code and Codex use it. (session-settled: user-directed — chosen over runc, youki, nsjail and gVisor for the outer layer: each adds a second isolation tool without removing bubblewrap, and rootless gVisor drops cgroup limits and network namespaces.) Governs R14.
+- **No VM.** The sessions share the host's kernel, as the Podman design did. (session-settled: user-directed — chosen over a dedicated VM for the agent worker and over a microVM per run.)
+- **The agent worker is a compose service of its own.** (session-settled: user-approved — chosen over a systemd service on the host: it keeps one deploy path and the Hatchet engine's gRPC internal, at the cost of R27's container settings and a profile kept in step with Docker's.) Governs R13, R27.
+- **The Claude credential lives in a proxy and the agent worker's egress is cut, from the first run.** Without both, a session that reads its own engine's credential could send it out. (session-settled: user-approved — chosen over deferring the proxy and `--network none`, as the Podman design did.) Governs R12, R16.
+- **Every tool corvo runs or ships has its license read at the source before it is adopted.** bubblewrap's files are LGPL-2.0-or-later and LGPL-2.1-or-later, and socat is GPL-2.0-only. Both run as separate, unmodified programs from distribution packages, which their licenses leave unrestricted. (session-settled: user-approved — chosen over permissive-only tools for the outer layer, after the license texts were read.)
 - **The caller gives the agent its working directory.** Cloning a repository or creating a worktree per issue is the caller's job. (session-settled: user-directed — chosen over the task building a temporary directory from its input.) Governs R5.
 - **The Claude credential is either an API key or a subscription OAuth token, chosen per environment.** (session-settled: user-directed — chosen over an API key only and over a subscription token only.) Governs R12.
 - **No automated test calls Claude; a manual run on Haiku proves each example.** (session-settled: user-directed — chosen over an e2e job against real Claude on every push to main, and over an on-demand e2e job.) Governs R22, R25.
 - **Hatchet does not retry agents.** A retry re-runs and re-pays the whole session, and the SDK already retries API errors itself. (session-settled: user-approved — chosen over corvo's `RETRIES` default, which assumes idempotent tasks.) Governs R7.
 - **Three examples cover the four shapes.** Example 2 combines the working directory with a custom tool, as `greeting-rounds` combined spawning and waiting. (session-settled: user-approved — chosen over one example per shape.) Governs R18, R19, R20.
-- **The container keeps network egress and receives the Claude credential, for now.** The SDK's docs recommend `--network none` behind a credential-injecting proxy; that is deferred. (session-settled: user-approved — chosen over building the proxy now.) Governs R15.
 
 ### Requirements
 
@@ -68,11 +65,11 @@ The tasks and workflows skeleton (`docs/plans/2026-10-14-1724-feat-worker-tasks-
 - R2. Only `corvo.agents` imports `claude_agent_sdk`. `corvo.agents` imports neither Hatchet nor `corvo.worker`, and `corvo.core` imports neither `corvo.agents` nor the SDK. A check fails on each of these imports in every module, including `corvo.worker` and `corvo.server.api`, whose files ignore ruff's TID251 wholesale today.
 - R3. Logic that must survive an SDK change, such as decisions on the agent's output and its tools' logic, lives in pure functions in `corvo.core.agents` at the mirrored path. The agent package only adapts that logic to the SDK.
 - R4. Every agent is written with its SDK's own API, with no corvo layer between it and the SDK.
-- R5. An agent takes its working directory as a parameter and gives it to the SDK as the session's working directory. The task accepts only working directories under one configured agent-workdir root that both the worker's user and the dedicated Podman user can read, resolving symlinks, and fails any other path before it starts a container.
+- R5. An agent takes its working directory as a parameter and gives it to the SDK as the session's working directory. The task accepts only working directories under one configured agent-workdir root, resolving symlinks, and fails any other path before it starts a session.
 
 **Hatchet integration**
 
-- R6. Each agent has a thin Hatchet task in `corvo.worker.agents` with an explicit name and Pydantic input and output models. The task is registered in `WORKFLOWS`, and the registration test covers the area.
+- R6. Each agent has a thin Hatchet task in `corvo.worker.agents` with an explicit name and Pydantic input and output models. Agent tasks are registered only in the agent worker's list, which holds nothing else, and the registration test covers both workers.
 - R7. Agent tasks declare `retries=0`, an agent execution timeout and an agent schedule timeout sized for the queue behind R9's cap, all defined once in the worker's defaults. A step that waits on an agent child declares a timeout derived from the agent's schedule and execution timeouts, not `WAITING_EXECUTION_TIMEOUT`.
 - R8. A run that ends without valid structured output fails its task. That covers an error result, the turn or budget limit, and a success result without `structured_output`. In every case the task logs the run's cost, turns and session ID.
 - R9. The pattern caps how many agent runs execute at once across the worker pool.
@@ -81,15 +78,20 @@ The tasks and workflows skeleton (`docs/plans/2026-10-14-1724-feat-worker-tasks-
 
 - R10. Every agent declares its model, its turn limit and its budget limit.
 - R11. Agents load no CLAUDE.md, skills, settings or auto memory, whether from the host or from the working directory. They use only tools they list explicitly, and every other tool call is denied.
-- R12. The Claude credential comes from corvo's settings, as an API key or a subscription OAuth token, and each environment chooses which.
+- R12. The Claude credential comes from corvo's settings, as an API key or a subscription OAuth token, and each environment chooses which. Only the proxy of R16 receives it.
 
 **Isolation**
 
-- R13. Each agent run executes in a fresh container started for that run. The agent's code runs inside the container and hands its structured output to the task, which then removes the container.
-- R14. Agent containers run on a rootless Podman under a dedicated host user, apart from the daemon that runs the compose stack. The worker stays a compose service and reaches Podman through that user's API socket, mounted into the worker's container and reachable by the worker's user through a shared group. When it starts, the worker checks that the host's cgroup controllers for memory, CPU and processes are available, and refuses agent runs when they are not.
-- R15. The agent container drops every capability, has a read-only root filesystem, runs under the default seccomp profile, and is limited in memory, CPU and processes. Besides size-limited tmpfs mounts for `/tmp` and the agent user's home, it receives only the working directory mount and the Claude credential, and it takes its request and hands back its result over its standard streams (agent-request-stdin plan, KTD6). The working directory is mounted read-only unless the agent declares that it writes to it, and a directory an agent may have written is untrusted output: the worker runs no hooks, config or code from it.
-- R16. When Hatchet times out or cancels an agent task, the task kills and removes its container. Every container carries labels with its run's ID and its Hatchet deployment (server and tenant). A worker that starts removes only containers of its own deployment whose run Hatchet reports as finished, failed or cancelled.
-- R17. One piece of the worker starts, waits on, reads and removes agent containers, and every agent task uses it.
+- R13. Agent tasks run only on a dedicated agent worker, which holds the Hatchet token but neither the database password nor the Claude credential.
+- R14. Each session's SDK engine runs in a fresh bubblewrap sandbox started for its run and ended with it, in a process namespace of its own and an environment that holds only what the session needs.
+- R15. Every shell command a session runs goes through the SDK's sandbox with its subprocess credential scrub, and a command that cannot be sandboxed does not run. Command network reaches only an allowlist, which is empty for every example.
+- R16. A proxy outside the agent worker holds the Claude credential, puts it in place of the placeholder each session sends, and forwards only to the Claude API. The agent worker's network reaches only the proxy and the Hatchet engine.
+- R17. One piece of the agent worker starts, bounds and ends each session's sandbox, and every agent task uses it. When Hatchet times out or cancels an agent task, no process of that run survives.
+- R26. A session sees only its run's working directory, a temporary home and read-only system files, and its own cgroup limits its memory, CPU and processes. The working directory is read-only unless the agent declares that it writes to it.
+- R27. The agent worker's container keeps a syscall filter: Docker's default profile plus only the calls bubblewrap needs. The profile is generated from the upstream one, and a CI check fails when the generated and the committed profiles differ.
+- R28. When the agent worker starts and its isolation cannot apply in full, it refuses agent runs and logs which part failed: bubblewrap, the SDK's sandbox, the cgroup delegation or the proxy.
+- R29. What a session hands back, and whatever it writes into its working directory, is untrusted output: the task validates the output (R8), and the worker runs no hooks, config or code from the directory.
+- R30. Custom tools run in the agent worker's process, outside the sandbox, so each one treats its input as untrusted.
 
 **Living examples**
 
@@ -101,50 +103,56 @@ The tasks and workflows skeleton (`docs/plans/2026-10-14-1724-feat-worker-tasks-
 **Tests**
 
 - R22. No automated test calls Claude, and a guard fails any test that tries.
-- R23. Each agent has unit tests that run without Hatchet and without a container, with the SDK replaced. Agent tasks and the container piece have unit tests with the agent and the container client replaced.
-- R24. The integration suite runs every example on the real Hatchet and a real rootless Podman, with the SDK replaced inside the container, including the kill and removal on timeout. It creates its working directories under the agent-workdir root (R5), not in pytest's temporary directories.
+- R23. Each agent has unit tests that run without Hatchet and without a sandbox, with the SDK replaced. Agent tasks and the session piece have unit tests with the agent and the sandbox replaced.
+- R24. The integration suite runs every example on the real Hatchet and real bubblewrap with the SDK's engine replaced, including the end of a run on timeout. It creates its working directories under the agent-workdir root (R5), not in pytest's temporary directories.
 - R25. Each example is proven once against real Claude Haiku with a small prompt, through a documented manual command whose run is recorded in the pull request.
+- R31. An automated test runs the real SDK engine in the real sandbox against a scripted Messages API that makes a session try each escape of AE5, and fails when any succeeds.
 
 ### How a run flows
 
 ```mermaid
 flowchart TB
-  WF[workflow: DAG or durable] -->|spawns as a child run| T[agent task in corvo.worker.agents]
-  T --> L[container piece in the worker]
-  L -->|starts through the dedicated user's socket| C[fresh container on rootless Podman]
-  C --> A[agent package in corvo.agents]
+  WF[workflow: DAG or durable] -->|spawns as a child run| T[agent task on the agent worker]
+  T -.-> S[session piece]
+  S -.-> A[agent package in corvo.agents]
   A -.->|pure calls| K[corvo.core.agents twin]
-  A -->|Claude Agent SDK session in the given working directory| CL[Claude API]
-  A -->|structured output| L
-  L -->|validated output model| T
-  L -->|kill and remove: on finish, timeout or cancel| C
+  A -->|query| E[SDK engine in a fresh bubblewrap sandbox, own cgroup]
+  E -->|each shell command| B[SDK sandbox with credential scrub]
+  E -->|placeholder credential| P[credential proxy]
+  P -->|real credential| CL[Claude API]
+  E -->|ResultMessage with structured output| A
+  S -->|validated output model| T
+  S -->|end the sandbox: on finish, timeout or cancel| E
 ```
 
-Solid arrows cross a process or container boundary. The dotted arrow is a plain function call into code that imports no SDK and no Hatchet.
+Solid arrows cross a process, sandbox or network boundary. Dotted arrows are calls inside the agent worker's process, where custom tools also run.
 
 ### Acceptance Examples
 
-- AE1. **Covers R6.** **Given** a new agent task in `corvo.worker.agents`, **when** its line is missing from `WORKFLOWS`, **then** the registration test fails and names the task.
+- AE1. **Covers R6.** **Given** a new agent task in `corvo.worker.agents`, **when** its line is missing from the agent worker's list, **then** the registration test fails and names the task.
 - AE2. **Covers R2.** **Given** a module outside `corvo.agents` that imports `claude_agent_sdk`, such as an agent task in `corvo.worker.agents`, or a module in `corvo.agents` that imports Hatchet, **when** the checks run, **then** they fail on that import.
 - AE3. **Covers R8.** **Given** an agent that reaches its turn limit, **when** its task finishes, **then** the run is marked failed without a retry, and its log holds the cost, turns and session ID.
-- AE4. **Covers R16, R24.** **Given** an agent run that is still working, **when** the task's execution timeout passes, **then** its container is killed and removed, and no container labelled with that run remains.
-- AE5. **Covers R16.** **Given** a container of this worker's deployment whose run Hatchet reports as ended, and another whose run is still running on a second worker, **when** a worker starts, **then** it removes the first and leaves the second running.
+- AE4. **Covers R17, R24.** **Given** an agent run that is still working, **when** the task's execution timeout passes, **then** its sandbox ends and no process of that run remains.
+- AE5. **Covers R13, R14, R15, R16, R26, R31.** **Given** a session whose shell command follows a prompt injection, **when** it tries to read the Hatchet token or the Claude credential from any process, write a result into its engine's output, list another run's or the host's files, or reach the internet, **then** every attempt fails and the task returns only the session's real output.
 - AE6. **Covers R11.** **Given** a working directory that holds a CLAUDE.md and `.claude/skills/`, **when** an agent runs in it, **then** the session loads neither.
-- AE7. **Covers R20, R24.** **Given** the workflow example on Hatchet and Podman with the SDK replaced, **when** it runs, **then** it returns outputs derived from both agents' structured outputs.
+- AE7. **Covers R20, R24.** **Given** the workflow example on Hatchet and bubblewrap with the SDK's engine replaced, **when** it runs, **then** it returns outputs derived from both agents' structured outputs.
 - AE8. **Covers R22.** **Given** a unit test that runs an agent without replacing the SDK, **when** it runs, **then** the guard fails it before any request leaves.
+- AE9. **Covers R26.** **Given** a session that allocates memory past its limit, **when** the limit is reached, **then** that run fails, and the agent worker and the other runs keep going.
+- AE10. **Covers R27, R28.** **Given** an agent worker whose container lacks R27's profile, so bubblewrap cannot create its namespaces, **when** it starts, **then** it refuses agent runs and logs that bubblewrap failed.
 
 ### Success Criteria
 
-- A contributor, human or LLM agent, adds a working agent by reading only the examples. That means an agent package, its core twin, a thin task, one line in `WORKFLOWS`, and their tests.
+- A contributor, human or LLM agent, adds a working agent by reading only the examples. That means an agent package, its core twin, a thin task, one line in the agent worker's list, and their tests.
 - The official Claude Agent SDK docs apply to corvo's agents unchanged, and Hatchet's task and workflow docs apply to their thin tasks.
-- A compromised agent container cannot read worker-only credentials such as the Hatchet token and the database password; it reads only the Claude credential it is given. A compromised worker cannot reach host root or the compose stack's containers through the agents' Podman.
+- AE5 holds with the operating system enforcing every part of it (R14, R15, R16, R26), not the SDK's permission rules.
+- A compromised agent worker finds no database password and no Claude credential to take (R13).
 
 ### Scope Boundaries
 
-- Agents that call Hatchet tasks as tools, and agents that run outside Hatchet and trigger it. Hatchet's `mcp_tool` builds a tool that runs in the agent's own process with a Hatchet client and token, and the agent container holds neither, so tools backed by Hatchet will need a bridge from the container to the worker.
+- Agents that call Hatchet tasks as tools, and agents that run outside Hatchet and trigger it. Custom tools run in the agent worker's process, which holds the tenant-wide Hatchet token, so a Hatchet-backed tool would put that authority behind the model's tool calls.
 - Other agent SDKs (OpenAI Agents SDK and others). Each will be written with its own API when its first agent arrives.
-- A credential-injecting proxy and `--network none` for agent containers. This must come before agents that process untrusted content.
-- gVisor or another hardened runtime for agent containers. It costs 10 to 200 times on file I/O, and its pairing with rootless Podman is unverified.
+- Shell network allowlist entries. The first agent whose commands need a host, such as GitHub, brings its entry.
+- runc, youki, nsjail or gVisor for the outer layer, and a VM or a microVM per run (Key Decisions).
 - More than one host: Kubernetes Jobs or a hosted sandbox (E2B, Modal).
 - An e2e job against real Claude, and evals. Evals belong to the question bank.
 - Resumable sessions, session stores, multi-turn conversations, subagents, and approval callbacks (human in the loop).
@@ -154,52 +162,69 @@ Solid arrows cross a process or container boundary. The dotted arrow is a plain 
 
 Considered and not built:
 
-- A periodic sweep. The in-container deadline (KTD4) ends every orphan's session, so a leftover container is a stopped one, which the next start's sweep removes. A host that runs for weeks without a worker restart while stopped containers pile up would change this.
-- Removing containers whose run Hatchet does not know. A 404 can come from a live run on another stack or from a read model that has not caught up, so the sweep keeps such a container and logs it. Evidence that these pile up on a real host would change this.
-- An age rule in the sweep. A just-exited container may still be read by the worker that started it, so removing by age races a live run. The deadline already bounds how long a session runs.
+- A systemd service on the host for the agent worker. It needs no relaxed container settings, but it adds a second deploy path and publishes the Hatchet engine's gRPC outside compose (Key Decisions).
 - A check that the credential's prefix matches its configured kind. A mismatch fails the first run at once with an `api_error` result and zero cost, which the run log shows.
-- Preparing again when a run finds agents disabled. The run fails at once with the logged reason, and a worker restart prepares again. A host where the socket regularly comes up after the worker would change this.
-- A worker-local semaphore against the moment Hatchet frees a slot before the container is gone. Memory is sized for the cap plus one (Risks).
-- Podman's own `--timeout` kill switch. It exists only in the libpod API, which docker-py does not speak (KTD5).
+- Preparing again when a run finds agents refused. The run fails at once with the logged reason, and a worker restart prepares again.
 
 #### Deferred to Follow-Up Work
 
-- An integration scenario for the writable working directory, and the permission checks around it, when the first agent that writes arrives. The skeleton implements the read-write mount (KTD6) and unit-tests it.
+- An integration scenario for the writable working directory, and the permission checks around it, when the first agent that writes arrives.
 
 ### Dependencies / Assumptions
 
-- hatchet-sdk 1.42.1 cancels a running async task's asyncio task on cancellation and timeout (`hatchet_sdk/worker/runner/runner.py:920-944`). It sets the context's cancellation flag, sleeps one second, cancels the task, and frees the task's slot without waiting for its `finally`. Engine timeout and cancel reach the worker as the same `CANCEL_STEP_RUN` action. The SDK also has a `claude` extra (unpinned) and `mcp_tool` (`hatchet_sdk/runnables/workflow.py:831`), neither used here.
-- The engine re-queues a task whose worker misses heartbeats for 30 seconds as an internal failure, up to `MaxInternalRetryCount` (10) times, whatever its `retries` (engine v0.110.5 `pkg/repository/task.go`, `pkg/repository/sqlcv1/tasks.sql`). `ctx.retry_count` is above zero on such a re-run.
-- claude-agent-sdk 0.2.167 (2026-10-14, bundling CLI 2.1.300) ships only `manylinux_2_17` wheels, which `python:3.14.7-slim` satisfies, and bundles a native `claude` binary of about 250 MB. It releases almost daily.
+- hatchet-sdk 1.42.1 cancels a running async task's asyncio task on cancellation and timeout (`hatchet_sdk/worker/runner/runner.py:920-944`). It sets the context's cancellation flag, sleeps one second, cancels the task, and frees the task's slot without waiting for its `finally`. Engine timeout and cancel reach the worker as the same `CANCEL_STEP_RUN` action. The SDK also has an unpinned `claude` extra and `mcp_tool` (`hatchet_sdk/runnables/workflow.py:831`), neither used here.
+- The engine re-queues a task whose worker misses heartbeats for 30 seconds as an internal failure, up to `MaxInternalRetryCount` times, which is 10, whatever its `retries` (engine v0.110.5 `pkg/repository/task.go`, `pkg/repository/sqlcv1/tasks.sql`). `ctx.retry_count` is above zero on such a re-run.
+- Hatchet API tokens are scoped per tenant, with no per-worker or narrower token (Hatchet security docs). A task goes only to workers that registered it, and worker labels attract tasks without keeping others away (Hatchet worker and worker-affinity docs).
+- claude-agent-sdk 0.2.167 (2026-10-14, bundling CLI 2.1.300) ships only `manylinux_2_17` wheels, which `python:3.14.7-slim` satisfies, and bundles a native `claude` binary of about 250 MB. It releases almost daily. `query()` runs that engine as a subprocess over stdio, and `ClaudeAgentOptions.env` is merged over the inherited environment (`_internal/transport/subprocess_cli.py`), so only a sandbox that starts from an empty environment keeps the worker's variables out of the engine.
 - The SDK's `ResultMessage` carries `subtype`, `is_error`, `structured_output`, `total_cost_usd`, `num_turns` and `session_id`. An error result is yielded, then raised as `ResultError`. An API failure arrives as `subtype="success"` with `is_error=True`. A Pydantic model's JSON Schema passed as `output_format` comes back in `structured_output` (Agent SDK Python reference and structured-outputs guide).
 - `allowed_tools` with `permission_mode="dontAsk"` still lets read-only Bash, the Agent tool and reads inside the working directory run. Restricting the tool set takes the `tools` option (Agent SDK `permissions.md`).
-- Podman's Docker-compatible API translates labels, mounts, tmpfs, `CapDrop`, `SecurityOpt`, `ReadonlyRootfs`, `PidsLimit`, `Memory` and `NanoCPUs` (Podman `pkg/api/handlers/compat/containers_create.go`). It forces read-write tmpfs mounts on `/run` and `/var/tmp` under a read-only root, which the memory cgroup bounds. docker-py refuses to send a user-namespace mode other than `host`, so `keep-id` is out of reach. Running on 4.9.3 and 6.1 is unverified until U1.
-- On cgroup v2, a rootless container that asks for a limit whose controller is not delegated fails to start. Only cgroup v1 drops limits with a warning, and Podman 6 refuses cgroup v1. systemd 252 or later delegates memory, CPU and processes to user sessions by default. A user without lingering has no session, and Podman then falls back to cgroupfs.
-- Versions differ by machine. Arch ships Podman 6.1.4, which has pasta only, Docker API 1.44 and positive-only label filter semantics, and Podman is not yet installed on this development machine. CI runs on `ubuntu-latest`: today Ubuntu 24.04 with Podman 4.9.3 (slirp4netns, API 1.41), from November 2026 Ubuntu 26.04 with Podman 5.7 (pasta).
-- CI runs the organization's reusable `python.yml`, which allows no services and no setup steps. It runs `uv run --locked … pytest` in a 20-minute job, with passwordless `sudo` on GitHub-hosted runners. Any Podman setup in CI happens inside pytest.
-- The integration suite runs `corvo-worker` as a host subprocess of the pytest session, which inherits its environment (`tests/integration/worker/conftest.py`). The compose stack runs only Hatchet there, so the worker runs as the developer's or the CI runner's user, the same user that owns the test Podman (KTD15).
+- Per the Claude Code sandboxing doc, the SDK's sandbox covers only the commands of Bash, PowerShell and Monitor, and file tools follow permission rules. The Python SDK runs commands unsandboxed when the sandbox cannot start, unless `failIfUnavailable` is set. Per the env-vars doc, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` strips credentials from commands' environments and runs them in their own PID namespace.
+- Measured on 2026-10-15 with the bundled engine against a local stand-in for the Messages API that scripted Bash and Read calls (Arch, kernel 7.2, bubblewrap 0.12.0, Docker 29.7.2):
+  - Without a sandbox, and with the outer bubblewrap alone, a shell command forged a `ResultMessage` that the SDK yielded before the real one. With the SDK's sandbox alone, the command still read the Hatchet token and the Claude credential in its environment and listed other checkouts. With both layers and the scrub, every attempt failed.
+  - The scrub forces `permission_mode` from `dontAsk` to `default`; with explicit `allowed_tools`, every other call was still denied. On the development host, the scrub's own bubblewrap fails outside an outer sandbox because `/run/containerd` exists but is unreadable, and it then runs nothing.
+  - The Read tool refuses `/proc/*/environ` as a device file. That is an engine check, not an OS boundary.
+  - The engine refuses to run with no credential. With a placeholder it sends `x-api-key: <placeholder>` for an API key, or `Authorization: Bearer <placeholder>` with `anthropic-beta: oauth-2025-04-20` for an OAuth token, to `ANTHROPIC_BASE_URL` alone, with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
+  - Docker's default seccomp profile refuses the user namespaces bubblewrap needs. That profile plus `clone`, `unshare`, `mount`, `umount2`, `pivot_root` and `setns` lets bubblewrap start, while `keyctl`, `add_key`, `request_key`, `perf_event_open`, `kexec_load` and `open_by_handle_at` stay refused.
+  - A fresh `/proc` also needs Docker's `/proc` masks lifted (`systempaths=unconfined`). uid 1000 then still cannot read `/proc/kcore` or `/proc/timer_list` and gains no write.
+  - With `writable-cgroups=true`, a root entrypoint delegated a cgroup subtree to uid 1000 and dropped root. A session in a child cgroup stopped at its process limit and was killed at its memory limit, while the worker's cgroup was untouched.
+- Ubuntu 24.04 and later restrict unprivileged user namespaces through AppArmor (`kernel.apparmor_restrict_unprivileged_userns`), and the sandboxing doc says bubblewrap needs an AppArmor profile there. Whether that blocks bubblewrap on CI's `ubuntu-latest` runner, on the host or inside Docker there is unverified.
+- CI runs the organization's reusable `python.yml`, which allows no services and no setup steps. It runs `uv run --locked … pytest` in a 20-minute job, with passwordless `sudo` on GitHub-hosted runners. Any sandbox setup in CI happens inside pytest.
 - uv_build packages every file under `src/corvo/`, so `prompts/*.md` reaches the wheel with no configuration (checked by building one). `.dockerignore` excludes `tests/`.
 - The subscription OAuth token is, by Anthropic's terms, for ordinary individual use by the subscriber. Products and services built on the Agent SDK must use API keys (`legal-and-compliance.md`; Agent SDK `overview.md`). A `claude setup-token` token lasts one year.
-- The default rootless network relays traffic through sockets the dedicated user opens on the host. The container therefore reaches the LAN, the cloud metadata endpoint and the compose stack's bridge addresses, not only the internet (passt and Podman network docs).
+
+### Outstanding Questions
+
+Deferred to Planning:
+
+- Which proxy holds the credential: a small service of corvo's or an existing proxy, with its license read first.
+- How CI gets bubblewrap, socat and user namespaces within `python.yml`'s no-setup rule, proved first on the runner as U1 proved Podman.
+- Which of `corvo.agents.runner`, `corvo.agents.frame`, `corvo.agents.envelope`, the fake CLI and the `agent` image stage survive, and how the existing stack's pull requests are reworked or closed.
+- What the agent worker does with cgroups a run left behind when it restarts.
+- How R22's guard admits R31's session against the scripted API and nothing else.
 
 ### Sources / Research
 
-- Claude Agent SDK docs, each page served as markdown under https://code.claude.com/docs/en/agent-sdk/:
-  - `overview.md`, `agent-loop.md` and `python.md`. These cover `query`, `ClaudeAgentOptions`, `ResultMessage` subtypes, `max_turns` and `max_budget_usd`, and the absence of a session timeout.
-  - `permissions.md`: `dontAsk`, `allowed_tools`, and the `tools` option that restricts the set.
-  - `claude-code-features.md`: `setting_sources=[]`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, and what `settingSources` does not control.
-  - `structured-outputs.md`: Pydantic schemas and `error_max_structured_output_retries`.
-  - `custom-tools.md`: `@tool`, `create_sdk_mcp_server` and `mcp__<server>__<tool>`.
-  - `hosting.md`: the subprocess model, ephemeral sessions, about 1 GiB per agent, and the known limitations.
-  - `secure-deployment.md`: isolation technologies, hardened `docker run` flags, and the credential proxy pattern.
-  - https://code.claude.com/docs/en/env-vars.md and `authentication.md`: the isolation and credential variables KTD3 and KTD12 set.
-- anthropics/claude-agent-sdk-python at `v0.2.167`: `tests/test_run_end_subprocess.py` (the fake-CLI pattern of KTD14), `_internal/query.py` (the control protocol and `mcp_message`), `_internal/transport/subprocess_cli.py` (CLI discovery and flags).
-- anthropics/claude-code-action `base-action/src/run-claude-sdk.ts`: the result checks KTD4 copies.
+- Claude Agent SDK and Claude Code docs, each page served as markdown under https://code.claude.com/docs/en/:
+  - `agent-sdk/overview.md`, `agent-sdk/agent-loop.md` and `agent-sdk/python.md`: `query`, `ClaudeAgentOptions` (`cli_path`, `sandbox`, `env`), `ResultMessage` subtypes, `max_turns` and `max_budget_usd`.
+  - `agent-sdk/permissions.md`: `dontAsk`, `allowed_tools`, and the `tools` option that restricts the set.
+  - `agent-sdk/claude-code-features.md`: `setting_sources=[]`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, and what `settingSources` does not control.
+  - `agent-sdk/structured-outputs.md` and `agent-sdk/custom-tools.md`.
+  - `agent-sdk/hosting.md`: the subprocess model, one subprocess per session, about 1 GiB per agent.
+  - `agent-sdk/secure-deployment.md`: isolation technologies and their ratings, and the credential proxy pattern.
+  - `sandboxing.md`: what the sandbox covers, bubblewrap and socat on Linux, `failIfUnavailable`, `allowUnsandboxedCommands`, nested containers.
+  - `env-vars.md`: `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` and the isolation and credential variables.
+- anthropics/claude-agent-sdk-python at `v0.2.167`: `tests/test_run_end_subprocess.py` (the fake-CLI pattern), `_internal/query.py` (the control protocol and `mcp_message`), `_internal/transport/subprocess_cli.py` (CLI discovery, flags and the child environment).
+- anthropics/claude-code-action `base-action/src/run-claude-sdk.ts`: result checks.
 - Hatchet docs:
   - https://docs.hatchet.run/cookbooks/hatchet-claude-agent-sdk-trusted-env.md and https://docs.hatchet.run/cookbooks/hatchet-and-mcp.md: `mcp_tool`, and "Hatchet does not provide native code sandboxing".
+  - https://docs.hatchet.run/v1/workers.md, https://docs.hatchet.run/v1/advanced-assignment/worker-affinity.md and https://docs.hatchet.run/v1/security/index.md: registration, labels, and tenant-scoped tokens.
   - https://docs.hatchet.run/v1/cancellation.md, https://docs.hatchet.run/v1/timeouts.md and https://docs.hatchet.run/v1/logging.md (1000 log lines per task).
-  - https://docs.hatchet.run/v1/concurrency.md: shared, tenant-scoped strategies (engine 0.106 or later).
-  - https://docs.hatchet.run/v1/advanced-assignment/slot-cost.md.
+  - https://docs.hatchet.run/v1/concurrency.md and https://docs.hatchet.run/v1/advanced-assignment/slot-cost.md.
+- Isolation tools and their licenses:
+  - containers/bubblewrap: `COPYING` and `LICENSE` (LGPL 2.1), the SPDX headers of its sources, and its Debian packaging.
+  - GNU GPL FAQ, https://www.gnu.org/licenses/gpl-faq.html, entries `#MereAggregation` and `#GPLPlugins`.
+  - moby/profiles `seccomp/default.json` and its history, vendored in moby at `docker-v29.7.2`.
+  - opencontainers/runc README (libseccomp), google/nsjail `Makefile`, the gVisor rootless guide (https://gvisor.dev/docs/user_guide/rootless/), youki-dev/youki, google/minijail, anthropic-experimental/sandbox-runtime.
 - Agent layouts:
   - google ADK project structure: https://adk.dev/get-started/python/.
   - anthropics/claude-cookbooks `claude_agent_sdk/`.
@@ -210,19 +235,11 @@ Considered and not built:
   - openai/openai-agents-python `ScriptedModel`.
   - pydantic-ai `TestModel` and `ALLOW_MODEL_REQUESTS`.
   - https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents.
-- Container runtimes:
-  - Docker security and rootless mode: https://docs.docker.com/engine/security/ and https://docs.docker.com/engine/security/rootless/.
-  - Podman system service: https://docs.podman.io/en/latest/markdown/podman-system-service.1.html, and Podman's `troubleshooting.md` on rootless cgroup delegation.
-  - GitLab Runner Docker executor with rootless Podman: https://docs.gitlab.com/runner/executors/docker/, and its labels and stop-and-wait code (`executors/docker/internal/labels`, `internal/wait`).
-  - GitLab on socket binding and DinD: https://docs.gitlab.com/ci/docker/using_docker_build/.
-  - Testcontainers DinD patterns (same-path mounts) and the Ryuk reaper.
-  - Tecnativa docker-socket-proxy `haproxy.cfg`, which filters by path and method only.
-  - gVisor rootless and Docker guides.
-  - nftables `meta skuid` matching: https://wiki.nftables.org/wiki-nftables/index.php/Matching_packet_metainformation.
 - Repo:
   - `docs/plans/2026-10-14-1724-feat-worker-tasks-workflows-skeleton-plan.md`, the precedent this work mirrors.
   - `src/corvo/worker/worker.py`, `src/corvo/worker/defaults.py` and `src/corvo/worker/hatchet_client.py`.
-  - `tests/worker/test_registration.py`, `ruff.toml`, `tests/conftest.py` and `tests/integration/worker/conftest.py`.
+  - `src/corvo/agents/tone/agent.py`, the first agent, and `src/corvo/settings.py`.
+  - `tests/worker/test_registration.py`, `ruff.toml`, `tests/conftest.py` (the guard) and `tests/integration/worker/conftest.py`.
   - `Dockerfile`, `.dockerignore`, `compose.yaml` and `.crew/config.yaml` (crew's agents).
 
 ---
