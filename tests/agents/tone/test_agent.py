@@ -33,10 +33,13 @@ async def test_the_options_are_isolated_and_ask_for_the_verdict(
     scripted = ScriptedQuery(init(), result(structured_output={"tone": "neutral"}))
     script(monkeypatch, scripted)
 
-    await agent.run(ToneInput(text="The meeting is at noon."), session())
+    given = session()
+
+    await agent.run(ToneInput(text="The meeting is at noon."), given)
 
     [options] = scripted.options
-    assert_isolated(options)
+    assert_isolated(options, given)
+    assert options.cwd is None
     assert options.tools == []
     assert options.allowed_tools == []
     assert options.model == "claude-haiku-5-5"
