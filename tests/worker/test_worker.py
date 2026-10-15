@@ -37,10 +37,12 @@ def events(
 
     monkeypatch.setattr(hatchet, "worker", spy)
     monkeypatch.setattr(Worker, "start", start)
-    # Hatchet's Worker installs its own SIGTERM handler; put it back after.
-    previous = signal.getsignal(signal.SIGTERM)
+    # Hatchet's Worker installs its own handlers; put them back after.
+    signals = (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT)
+    previous = {signum: signal.getsignal(signum) for signum in signals}
     yield recorded
-    signal.signal(signal.SIGTERM, previous)
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
 
 
 @pytest.fixture(autouse=True)
