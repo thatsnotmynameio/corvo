@@ -1,14 +1,16 @@
 from pathlib import Path
+from typing import Any
 
 import pytest
 from docker.types import Mount
 from hatchet_sdk import V1TaskStatus
 
 from corvo.agents.envelope import ProbeReport
-from corvo.worker.agent_runtime import spec
 from corvo.worker.agent_runtime.spec import (
     Credential,
+    CredentialKind,
     InvalidWorkdir,
+    Lookup,
     Run,
     check_workdir,
     container_spec,
@@ -44,34 +46,49 @@ ISOLATION = {
 }
 
 
-def test_the_spec_hardens_and_limits_the_container() -> None:
-    built = container_spec(
-        image="corvo-agent", run=RUN, command=["run"], run_dir=Path("/r")
+def built(
+    run_dir: str = "/r",
+    workdir: str | None = None,
+    writes_workdir: bool = False,
+    credential: Credential | None = None,
+) -> dict[str, Any]:
+    """The spec of RUN's container."""
+    return container_spec(
+        image="corvo-agent",
+        name=RUN.name,
+        labels=RUN.labels,
+        command=["run"],
+        run_dir=Path(run_dir),
+        workdir=None if workdir is None else Path(workdir),
+        writes_workdir=writes_workdir,
+        credential=credential,
     )
 
-    assert built["image"] == "corvo-agent"
-    assert built["command"] == ["run"]
-    assert built["cap_drop"] == ["ALL"]
-    assert built["security_opt"] == ["no-new-privileges"]
-    assert built["read_only"] is True
-    assert built["init"] is True
-    assert built["tmpfs"] == {
+
+def test_the_spec_hardens_and_limits_the_container() -> None:
+    spec = built()
+
+    assert spec["image"] == "corvo-agent"
+    assert spec["command"] == ["run"]
+    assert spec["cap_drop"] == ["ALL"]
+    assert spec["security_opt"] == ["no-new-privileges"]
+    assert spec["read_only"] is True
+    assert spec["init"] is True
+    assert spec["tmpfs"] == {
         "/tmp": "rw,noexec,nosuid,nodev,size=100m",
         "/home/agent": "rw,noexec,nosuid,nodev,size=500m",
     }
-    assert built["mem_limit"] == AGENT_MEMORY
-    assert built["memswap_limit"] == AGENT_MEMORY
-    assert built["nano_cpus"] == AGENT_NANO_CPUS
-    assert built["pids_limit"] == AGENT_PIDS_LIMIT
+    assert spec["mem_limit"] == AGENT_MEMORY
+    assert spec["memswap_limit"] == AGENT_MEMORY
+    assert spec["nano_cpus"] == AGENT_NANO_CPUS
+    assert spec["pids_limit"] == AGENT_PIDS_LIMIT
 
 
-def test_the_spec_names_and_labels_the_run() -> None:
-    built = container_spec(
-        image="corvo-agent", run=RUN, command=["run"], run_dir=Path("/r")
-    )
+def test_a_run_is_named_and_labelled_after_its_attempt() -> None:
+    spec = built()
 
-    assert built["name"] == "corvo-agent-task-1-0"
-    assert built["labels"] == {
+    assert spec["name"] == "corvo-agent-task-1-0"
+    assert spec["labels"] == {
         "corvo.managed": "true",
         "corvo.deployment": "tenant@http://hatchet",
         "corvo.run_id": "run-1",
@@ -82,47 +99,26 @@ def test_the_spec_names_and_labels_the_run() -> None:
 
 
 def test_the_spec_mounts_the_run_directory_and_a_read_only_workdir() -> None:
-    built = container_spec(
-        image="corvo-agent",
-        run=RUN,
-        command=["run"],
-        run_dir=Path("/root/runs/task-1-0"),
-        workdir=Path("/root/workdirs/repo"),
-    )
+    spec = built(run_dir="/root/runs/task-1-0", workdir="/root/workdirs/repo")
 
-    assert built["mounts"] == [
+    assert spec["mounts"] == [
         Mount("/corvo/run", "/root/runs/task-1-0", type="bind", read_only=False),
         Mount("/workspace", "/root/workdirs/repo", type="bind", read_only=True),
     ]
 
 
 def test_an_agent_that_writes_gets_a_writable_workdir() -> None:
-    built = container_spec(
-        image="corvo-agent",
-        run=RUN,
-        command=["run"],
-        run_dir=Path("/r"),
-        workdir=Path("/w"),
-        writes_workdir=True,
-    )
+    spec = built(workdir="/w", writes_workdir=True)
 
-    assert Mount("/workspace", "/w", type="bind", read_only=False) in built["mounts"]
+    assert Mount("/workspace", "/w", type="bind", read_only=False) in spec["mounts"]
 
 
 def test_a_run_without_a_workdir_mounts_no_workspace() -> None:
-    built = container_spec(
-        image="corvo-agent", run=RUN, command=["run"], run_dir=Path("/r")
-    )
-
-    assert [mount["Target"] for mount in built["mounts"]] == ["/corvo/run"]
+    assert [mount["Target"] for mount in built()["mounts"]] == ["/corvo/run"]
 
 
 def test_without_a_credential_the_spec_carries_only_the_isolation() -> None:
-    built = container_spec(
-        image="corvo-agent", run=RUN, command=["probe"], run_dir=Path("/r")
-    )
-
-    assert built["environment"] == ISOLATION
+    assert built()["environment"] == ISOLATION
 
 
 @pytest.mark.parametrize(
@@ -130,17 +126,11 @@ def test_without_a_credential_the_spec_carries_only_the_isolation() -> None:
     [("api_key", "ANTHROPIC_API_KEY"), ("oauth_token", "CLAUDE_CODE_OAUTH_TOKEN")],
 )
 def test_the_credential_reaches_the_container_under_its_one_name(
-    kind: spec.CredentialKind, variable: str
+    kind: CredentialKind, variable: str
 ) -> None:
-    built = container_spec(
-        image="corvo-agent",
-        run=RUN,
-        command=["run"],
-        run_dir=Path("/r"),
-        credential=Credential(kind=kind, value="secret"),
-    )
+    spec = built(credential=Credential(kind=kind, value="secret"))
 
-    assert built["environment"] == {**ISOLATION, variable: "secret"}
+    assert spec["environment"] == {**ISOLATION, variable: "secret"}
 
 
 @pytest.fixture
@@ -202,7 +192,7 @@ def test_the_sweep_keeps_a_container_whose_run_goes_on(status: V1TaskStatus) -> 
 
 
 @pytest.mark.parametrize("lookup", ["not_found", "timed_out"])
-def test_the_sweep_warns_of_a_run_it_could_not_read(lookup: spec.Lookup) -> None:
+def test_the_sweep_warns_of_a_run_it_could_not_read(lookup: Lookup) -> None:
     assert sweep_decision(lookup) == "warn"
 
 

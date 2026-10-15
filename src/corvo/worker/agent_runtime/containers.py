@@ -154,19 +154,24 @@ def remove_tree(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def remove(container: Container) -> None:
+    """Force-removes the container, running or exited. One already gone (404)
+    or being removed (409) counts as removed."""
+    try:
+        container.remove(force=True)
+    except NotFound:
+        pass
+    except APIError as error:
+        if error.status_code != 409:
+            raise
+
+
 def remove_labelled(client: DockerClient, label: str) -> int:
     """Force-removes every managed container carrying the label, and says how
-    many it found. A container already gone (404) or being removed (409)
-    counts as removed."""
+    many it found."""
     found = client.containers.list(all=True, filters={"label": [MANAGED, label]})
     for container in found:
-        try:
-            container.remove(force=True)
-        except NotFound:
-            pass
-        except APIError as error:
-            if error.status_code != 409:
-                raise
+        remove(container)
     return len(found)
 
 
@@ -331,6 +336,16 @@ async def guard_rerun(runtime: Runtime, run: Run) -> None:
         )
 
 
+async def remove_run(
+    client: DockerClient, label: str, run_dir: Path, calls: Calls
+) -> None:
+    """Removes a container and its run directory, once the calls that
+    create and start it have returned."""
+    await calls.settle()
+    await asyncio.to_thread(remove_labelled, client, label)
+    await asyncio.to_thread(remove_tree, run_dir)
+
+
 async def shielded(cleanup: Coroutine[Any, Any, None]) -> None:
     """Runs cleanup to its end within CLEANUP_TIMEOUT, even when the task is
     cancelled while it runs."""
@@ -387,7 +402,8 @@ async def run_agent[T: BaseModel](
         runtime.in_flight.add(run.task_run_id)
         spec = container_spec(
             image=runtime.image,
-            run=run,
+            name=run.name,
+            labels=run.labels,
             command=["run"],
             run_dir=run_dir,
             workdir=workdir,
@@ -412,11 +428,9 @@ async def clean_up(
     """Removes the run's container and run directory. A failure is logged,
     not raised: it must not hide how the run itself ended."""
     try:
-        await calls.settle()
-        await asyncio.to_thread(
-            remove_labelled, runtime.client, f"corvo.task_run_id={run.task_run_id}"
+        await remove_run(
+            runtime.client, f"corvo.task_run_id={run.task_run_id}", run_dir, calls
         )
         runtime.in_flight.discard(run.task_run_id)
-        await asyncio.to_thread(remove_tree, run_dir)
     except Exception as error:
         log(f"agent {run.agent}: cleanup failed: {type(error).__name__}: {error}")

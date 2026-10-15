@@ -111,7 +111,8 @@ class Run:
 def container_spec(
     *,
     image: str,
-    run: Run,
+    name: str,
+    labels: dict[str, str],
     command: list[str],
     run_dir: Path,
     workdir: Path | None = None,
@@ -130,8 +131,8 @@ def container_spec(
     return {
         "image": image,
         "command": command,
-        "name": run.name,
-        "labels": run.labels,
+        "name": name,
+        "labels": labels,
         "cap_drop": ["ALL"],
         "security_opt": ["no-new-privileges"],
         "read_only": True,
