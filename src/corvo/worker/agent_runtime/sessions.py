@@ -232,8 +232,19 @@ async def run_agent[I: BaseModel, O: BaseModel](
         # On a failure, the end kills again, and logs what fails.
         with contextlib.suppress(OSError):
             cgroup.kill()
-        ending = asyncio.ensure_future(end(agent, cgroup, child, cancelled, ctx.log))
-        out_of_memory = await asyncio.shield(ending)
+        ending = asyncio.ensure_future(end(agent, cgroup, child, ctx.log))
+        try:
+            out_of_memory = await asyncio.shield(ending)
+        except asyncio.CancelledError:
+            # A cancel during the end, after the session ended on its own.
+            cancelled = True
+            raise
+        finally:
+            if cancelled:
+                # The run log still ends with the report line, after the end's.
+                ending.add_done_callback(
+                    lambda done: report_cancel(agent, child, done, ctx.log)
+                )
     return conclude(agent, child, finished, out_of_memory, ctx.log)
 
 
@@ -241,7 +252,6 @@ async def end(
     agent: str,
     cgroup: Cgroup,
     child: asyncio.Task[Any],
-    cancelled: bool,
     log: Callable[[str], None],
 ) -> bool:
     """Ends the session once its cgroup has been killed, and says whether the
@@ -274,10 +284,27 @@ async def end(
         log(f"agent {agent}: cleanup failed: {type(error).__name__}: {error}")
     if cgroup.path in in_flight:
         log(f"agent {agent}: {cgroup.path.name} is left for the next start's sweep")
-    if cancelled:
-        outcome = OUT_OF_MEMORY if out_of_memory else "cancelled"
-        log(report_line(agent, outcome, RunReport()))
     return out_of_memory
+
+
+def report_cancel(
+    agent: str,
+    child: asyncio.Task[Any],
+    ending: asyncio.Future[bool],
+    log: Callable[[str], None],
+) -> None:
+    """Logs a cancelled run's report line once its end is done, with what the
+    session reported when it ended before the cancel."""
+    out_of_memory = (
+        not ending.cancelled() and ending.exception() is None and ending.result()
+    )
+    report = RunReport()
+    if child.done() and not child.cancelled():
+        if isinstance(error := child.exception(), AgentRunFailed):
+            report = error.report
+        elif error is None:
+            _, report = child.result()
+    log(report_line(agent, OUT_OF_MEMORY if out_of_memory else "cancelled", report))
 
 
 def conclude[O](

@@ -301,6 +301,35 @@ async def test_a_cancel_before_the_agent_starts_still_removes_the_cgroup(
     assert sessions.in_flight == set()
 
 
+async def test_a_cancel_during_the_end_still_ends_the_log_with_the_report(
+    tree: Tree, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sessions, "POLL_INTERVAL", 0)
+    ctx = FakeContext()
+    running = asyncio.create_task(run(Agent(), ctx))
+    polls = iter([True])
+
+    def cancel_on_first_poll() -> bool:
+        # The session has ended with its output; the cancel lands at the
+        # piece's wait on its end.
+        populated = next(polls, False)
+        if populated:
+            running.cancel()
+        return populated
+
+    monkeypatch.setattr(tree, "populated", cancel_on_first_poll)
+
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    # The end goes on after the task, and its report line follows it.
+    async with asyncio.timeout(1):
+        while "remove" not in tree.events:
+            await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert ctx.lines[-1] == "agent tone: cancelled, cost=0.0042 turns=2 session=s-1"
+
+
 async def test_a_process_joining_after_the_kill_is_killed_by_a_poll(
     tree: Tree, monkeypatch: pytest.MonkeyPatch
 ) -> None:
