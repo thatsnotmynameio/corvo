@@ -13,6 +13,7 @@ from hatchet_sdk import V1TaskStatus
 from hatchet_sdk.clients.rest.exceptions import NotFoundException
 
 from corvo.agents.envelope import ProbeReport
+from corvo.agents.frame import encode
 from corvo.settings import Settings
 from corvo.worker.agent_runtime import containers, startup
 from corvo.worker.agent_runtime.containers import Runtime
@@ -26,9 +27,10 @@ IMAGE = "localhost/corvo-agent:latest"
 
 
 def probing(probed: ProbeReport, code: int = 0) -> Behaviour:
-    def behaviour(run_dir: Path) -> Exit:
-        (run_dir / "probe.json").write_text(probed.model_dump_json())
-        return Exit(code=code)
+    """A probe that frames its report on its stdout, as corvo-agent does."""
+
+    def behaviour(request: bytes) -> Exit:
+        return Exit(stdout=[encode(probed.model_dump_json().encode())], code=code)
 
     return behaviour
 
@@ -94,10 +96,10 @@ async def test_the_probe_runs_the_spec_without_a_credential(
 ) -> None:
     specs: list[dict[str, Any]] = []
 
-    def record(run_dir: Path) -> Exit:
+    def record(request: bytes) -> Exit:
         [container] = podman.containers.made
         specs.append(container.spec)
-        return probing(matching_report())(run_dir)
+        return probing(matching_report())(request)
 
     podman.behaviour = record
 
@@ -113,7 +115,7 @@ async def test_the_probe_runs_the_spec_without_a_credential(
 @pytest.mark.parametrize(
     "probed", [matching_report(), matching_report(memory_max="max")]
 )
-async def test_the_probe_leaves_no_container_or_directory(
+async def test_the_probe_leaves_no_container_socket_or_file(
     podman: FakeClient, settings: Settings, probed: ProbeReport
 ) -> None:
     podman.behaviour = probing(probed)
@@ -121,7 +123,9 @@ async def test_the_probe_leaves_no_container_or_directory(
     await startup.prepare(settings, DEPLOYMENT, nothing_ran)
 
     assert podman.containers.made == []
-    assert list((Path(settings.agent_root) / "runs").iterdir()) == []
+    assert podman.events == ["create", "attach", "start"]
+    assert podman.open_sockets() == []
+    assert list(Path(settings.agent_root).iterdir()) == []
 
 
 @pytest.mark.parametrize(
@@ -151,7 +155,7 @@ async def test_a_probe_that_differs_disables_agents(
 async def test_a_probe_that_fails_disables_agents(
     podman: FakeClient, settings: Settings
 ) -> None:
-    podman.behaviour = lambda run_dir: Exit(code=1)
+    podman.behaviour = lambda request: Exit(code=1)
 
     await startup.prepare(settings, DEPLOYMENT, nothing_ran)
 
@@ -159,18 +163,22 @@ async def test_a_probe_that_fails_disables_agents(
     assert podman.containers.made == []
 
 
+@pytest.mark.parametrize(
+    ("stdout", "problem"),
+    [
+        (encode(b'{"fingerprint": "leaked-content"}'), "probe's report is invalid"),
+        (b"leaked-content", "probe's report is invalid"),
+        (b"", "probe left no report"),
+    ],
+)
 async def test_an_invalid_probe_report_disables_agents_without_its_content(
-    podman: FakeClient, settings: Settings
+    podman: FakeClient, settings: Settings, stdout: bytes, problem: str
 ) -> None:
-    def behaviour(run_dir: Path) -> Exit:
-        (run_dir / "probe.json").write_text('{"fingerprint": "leaked-content"}')
-        return Exit()
-
-    podman.behaviour = behaviour
+    podman.behaviour = lambda request: Exit(stdout=[stdout])
 
     await startup.prepare(settings, DEPLOYMENT, nothing_ran)
 
-    assert containers.state == "agents are disabled: the probe's report is invalid"
+    assert containers.state == f"agents are disabled: the {problem}"
 
 
 async def test_a_missing_image_disables_agents(
@@ -386,7 +394,7 @@ async def test_sigterm_hands_over_even_when_the_removal_fails(
 async def test_sigterm_during_preparation_removes_the_probe(
     podman: FakeClient, settings: Settings
 ) -> None:
-    podman.behaviour = lambda run_dir: Exit(hangs=True)
+    podman.behaviour = lambda request: Exit(hangs=True)
     preparing = asyncio.create_task(
         startup.prepare_until_stopped(settings, DEPLOYMENT, nothing_ran)
     )
@@ -399,7 +407,7 @@ async def test_sigterm_during_preparation_removes_the_probe(
     async with asyncio.timeout(5):
         assert await preparing
     assert podman.containers.made == []
-    assert list((Path(settings.agent_root) / "runs").iterdir()) == []
+    assert podman.open_sockets() == []
 
 
 async def test_preparation_that_ends_reports_no_stop(

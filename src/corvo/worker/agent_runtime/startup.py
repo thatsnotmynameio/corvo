@@ -2,8 +2,9 @@
 
 When agents are configured, prepare checks within 45 seconds that the
 agent image is in the agents' Podman, runs corvo-agent probe in a container
-built by the same spec as every run, compares the probe's report with that
-spec and with the worker's own fingerprint, and sweeps the containers of
+built by the same spec as every run, reads its report over the same attach
+stream a run's envelope comes by, compares it with that spec and with the
+worker's own fingerprint, and sweeps the containers of
 this deployment whose run has ended. Any failure disables agents, with the
 reason logged, until the worker restarts: every agent run then fails at
 once with that reason, and every other task keeps working. A sweep that
@@ -35,17 +36,17 @@ from pydantic import ValidationError
 
 from corvo.agents.envelope import ProbeReport
 from corvo.agents.fingerprint import fingerprint
+from corvo.agents.frame import FrameError, extract
 from corvo.settings import Settings
 from corvo.worker.agent_runtime import containers
 from corvo.worker.agent_runtime.containers import (
     CLEANUP_TIMEOUT,
     NOT_CONFIGURED,
     PODMAN_TIMEOUT,
+    Attachment,
     Calls,
     Runtime,
-    UntrustedFile,
-    make_run_dir,
-    read_untrusted,
+    follow,
     remove,
     remove_in_flight,
     remove_run,
@@ -136,14 +137,13 @@ async def sweep(client: DockerClient, deployment: str, status_of: StatusOf) -> N
 
 
 async def clean_up_probe(
-    client: DockerClient, label: str, run_dir: Path, calls: Calls
+    client: DockerClient, label: str, attachment: Attachment, calls: Calls
 ) -> None:
-    """Removes the probe's container and run directory within
-    CLEANUP_TIMEOUT. A failure is logged, not raised: the probe's own outcome
-    decides whether agents run."""
+    """Removes the probe's container within CLEANUP_TIMEOUT. A failure is
+    logged, not raised: the probe's own outcome decides whether agents run."""
     try:
         async with asyncio.timeout(CLEANUP_TIMEOUT):
-            await remove_run(client, label, run_dir, calls)
+            await remove_run(client, label, attachment, calls)
     except Exception:
         logger.exception("removing the probe's container failed")
 
@@ -153,8 +153,6 @@ async def probe(client: DockerClient, settings: Settings, deployment: str) -> No
     no working directory, and raises Disabled when its report differs from
     the spec or from the worker's fingerprint."""
     probe_id = uuid4().hex
-    run_dir = Path(settings.agent_root) / "runs" / f"probe-{probe_id}"
-    make_run_dir(run_dir)
     label = f"corvo.probe={probe_id}"
     spec = container_spec(
         image=settings.agent_image,
@@ -165,27 +163,30 @@ async def probe(client: DockerClient, settings: Settings, deployment: str) -> No
             "corvo.probe": probe_id,
         },
         command=["probe"],
-        run_dir=run_dir,
     )
     calls = Calls()
+    attachment = Attachment()
     try:
         container = await calls(client.containers.create, **spec)
+        await calls(attachment.open, client=client, container=spec["name"])
         await calls(container.start)
-        exit_code = (await asyncio.to_thread(container.wait))["StatusCode"]
+        exit_code, _, stdout = await asyncio.to_thread(
+            follow, container, attachment, logger.info
+        )
         if exit_code != 0:
             raise Disabled(f"the probe exited with {exit_code}")
         try:
-            raw = read_untrusted(run_dir / "probe.json")
-            report = ProbeReport.model_validate_json(raw)
-        # Two clauses: see corvo.agents.runner.
-        except OSError:
-            raise Disabled("the probe's report is invalid") from None
-        except UntrustedFile:
+            framed = extract(stdout)
+            if framed is None:
+                raise Disabled("the probe left no report")
+            report = ProbeReport.model_validate_json(framed)
+        # Two clauses: see corvo.worker.agent_runtime.containers.
+        except FrameError:
             raise Disabled("the probe's report is invalid") from None
         except ValidationError:
             raise Disabled("the probe's report is invalid") from None
     finally:
-        await shielded(clean_up_probe(client, label, run_dir, calls))
+        await shielded(clean_up_probe(client, label, attachment, calls))
 
     problems = probe_problems(report, fingerprint())
     if problems:
@@ -211,7 +212,6 @@ async def check(
             f"the image {settings.agent_image} is not in the agents' Podman: "
             "build it there with --target agent"
         ) from None
-    (Path(settings.agent_root) / "runs").mkdir(exist_ok=True)
     await probe(client, settings, deployment)
     try:
         async with asyncio.timeout(SWEEP_TIMEOUT):

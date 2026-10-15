@@ -5,6 +5,7 @@ import pytest
 from docker import DockerClient
 
 from corvo.agents.envelope import AgentRequest, RunReport, Succeeded
+from corvo.agents.frame import encode
 from corvo.agents.tone.models import ToneInput, ToneOutput
 from corvo.worker.agent_runtime import containers
 from corvo.worker.agent_runtime.containers import Runtime
@@ -34,17 +35,13 @@ async def test_tone_runs_the_tone_agent_in_its_container(
 ) -> None:
     requests: list[AgentRequest] = []
 
-    def agent(run_dir: Path) -> Exit:
-        requests.append(
-            AgentRequest.model_validate_json((run_dir / "request.json").read_text())
-        )
+    def agent(request: bytes) -> Exit:
+        requests.append(AgentRequest.model_validate_json(request))
         envelope = Succeeded(
             output={"tone": "neutral", "friendly": False}, report=RunReport()
         )
-        (run_dir / "result.json").write_text(envelope.model_dump_json())
-        return Exit()
+        return Exit(stdout=[encode(envelope.model_dump_json().encode())])
 
-    (tmp_path / "runs").mkdir()
     runtime = Runtime(
         client=cast(DockerClient, FakeClient(agent)),
         root=tmp_path,

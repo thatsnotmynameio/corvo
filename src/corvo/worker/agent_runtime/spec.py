@@ -4,10 +4,12 @@ container_spec builds docker-py's arguments for every agent container, the
 startup probe's included (KTD6): every capability dropped, no new
 privileges, Podman's default seccomp profile, a read-only root, an init, two
 size-limited tmpfs mounts with Anthropic's hardened flags, and the memory,
-CPU and process limits from corvo.worker.defaults. The container receives
-the run directory, the working directory when the run has one, the
-isolation variables and at most one credential, and nothing else. Its
-network is the API's default (KTD16).
+CPU and process limits from corvo.worker.defaults. Its stdin stays open,
+with no tty, for the request, and its log driver is none: what it prints
+reaches the worker over the attach stream alone, and no copy of an
+envelope stays in the host's journal. The container receives the working
+directory when the run has one, the isolation variables and at most one
+credential, and nothing else. Its network is the API's default (KTD16).
 
 The rest decides what the container piece does with what it reads: which
 working directories a run may mount, what the deployment label is, which
@@ -19,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from docker.types import Mount
+from docker.types import LogConfig, Mount
 from hatchet_sdk import V1TaskStatus
 
 from corvo.agents.envelope import ProbeReport
@@ -31,8 +33,7 @@ from corvo.worker.defaults import (
     AGENT_PIDS_LIMIT,
 )
 
-# Where the container sees the run directory and the working directory.
-RUN_MOUNT = "/corvo/run"
+# Where the container sees the working directory.
 WORKSPACE = "/workspace"
 
 # Every agent container carries it, and every lookup filters on it.
@@ -119,13 +120,12 @@ def container_spec(
     name: str,
     labels: dict[str, str],
     command: list[str],
-    run_dir: Path,
     workdir: Path | None = None,
     writes_workdir: bool = False,
     credential: Credential | None = None,
 ) -> dict[str, Any]:
     """docker-py's arguments to containers.create, for one agent container."""
-    mounts = [Mount(RUN_MOUNT, str(run_dir), type="bind", read_only=False)]
+    mounts: list[Mount] = []
     if workdir is not None:
         mounts.append(
             Mount(WORKSPACE, str(workdir), type="bind", read_only=not writes_workdir)
@@ -152,6 +152,9 @@ def container_spec(
         "pids_limit": AGENT_PIDS_LIMIT,
         "mounts": mounts,
         "environment": environment,
+        "stdin_open": True,
+        "tty": False,
+        "log_config": LogConfig(type=LogConfig.types.NONE),
     }
 
 

@@ -82,11 +82,25 @@ async def ended(hatchet: Hatchet, run_id: str) -> Any:
 async def test_tone_runs_in_a_container_it_then_removes(
     hatchet: Hatchet, podman: Podman
 ) -> None:
-    async with asyncio.timeout(120):
-        output = await tone_stub(hatchet).aio_run(ToneInput(text="Thanks a lot!"))
+    # Covers AE1: the request reaches the container over its stdin, so the
+    # agent root holds nothing but the Podman socket at any point of the run.
+    seen: set[Path] = set()
+
+    async def watch() -> None:
+        while True:
+            seen.update(p for p in podman.root.rglob("*") if not p.is_socket())
+            await asyncio.sleep(0.05)
+
+    watching = asyncio.create_task(watch())
+    try:
+        async with asyncio.timeout(120):
+            output = await tone_stub(hatchet).aio_run(ToneInput(text="Thanks a lot!"))
+    finally:
+        watching.cancel()
 
     assert output == ToneOutput(tone="friendly", friendly=True)
     assert labelled(podman) == []
+    assert seen == set()
 
 
 async def test_the_worker_found_its_containers_as_the_spec_asks(

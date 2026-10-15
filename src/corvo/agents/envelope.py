@@ -1,11 +1,12 @@
 """What the worker hands an agent's container, and what the container hands back.
 
-The worker writes an AgentRequest to request.json in the run directory, and
-the container's entrypoint (corvo.agents.runner) writes the envelope, a
-Succeeded or a Failed, to result.json; the startup probe writes its
-ProbeReport to probe.json. The worker imports this module, so it
-imports only Pydantic and the standard library, never the SDK. The worker
-treats every file the container wrote as untrusted, and validates it here.
+The worker writes an AgentRequest to the container's stdin, and the
+container's entrypoint (corvo.agents.runner) writes the envelope, a
+Succeeded or a Failed, to its stdout; the startup probe writes its
+ProbeReport there too, each framed by corvo.agents.frame. The worker
+imports this module, so it imports only Pydantic and the standard library,
+never the SDK. The worker treats everything the container wrote as
+untrusted, and validates it here.
 """
 
 from typing import Annotated, Literal
@@ -61,7 +62,7 @@ ENVELOPE: TypeAdapter[Succeeded | Failed] = TypeAdapter(
 
 
 class ProbeReport(BaseModel):
-    """What corvo-agent probe read inside its container, to probe.json.
+    """What corvo-agent probe read inside its container, framed on its stdout.
 
     The worker compares it with the container spec it asked for and with its
     own fingerprint before it serves any agent (KTD10).

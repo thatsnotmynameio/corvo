@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from docker.types import Mount
+from docker.types import LogConfig, Mount
 from hatchet_sdk import V1TaskStatus
 
 from corvo.agents.envelope import ProbeReport
@@ -49,7 +49,6 @@ ISOLATION = {
 
 
 def built(
-    run_dir: str = "/r",
     workdir: str | None = None,
     writes_workdir: bool = False,
     credential: Credential | None = None,
@@ -60,7 +59,6 @@ def built(
         name=RUN.name,
         labels=RUN.labels,
         command=["run"],
-        run_dir=Path(run_dir),
         workdir=None if workdir is None else Path(workdir),
         writes_workdir=writes_workdir,
         credential=credential,
@@ -100,13 +98,19 @@ def test_a_run_is_named_and_labelled_after_its_attempt() -> None:
     }
 
 
-def test_the_spec_mounts_the_run_directory_and_a_read_only_workdir() -> None:
-    spec = built(run_dir="/root/runs/task-1-0", workdir="/root/workdirs/repo")
+def test_the_spec_mounts_a_read_only_workdir() -> None:
+    spec = built(workdir="/root/workdirs/repo")
 
     assert spec["mounts"] == [
-        Mount("/corvo/run", "/root/runs/task-1-0", type="bind", read_only=False),
         Mount("/workspace", "/root/workdirs/repo", type="bind", read_only=True),
     ]
+
+
+def test_the_spec_opens_stdin_without_a_tty_and_keeps_no_log() -> None:
+    spec = built()
+
+    assert (spec["stdin_open"], spec["tty"]) == (True, False)
+    assert spec["log_config"] == LogConfig(type="none")
 
 
 def test_an_agent_that_writes_gets_a_writable_workdir() -> None:
@@ -116,7 +120,7 @@ def test_an_agent_that_writes_gets_a_writable_workdir() -> None:
 
 
 def test_a_run_without_a_workdir_mounts_no_workspace() -> None:
-    assert [mount["Target"] for mount in built()["mounts"]] == ["/corvo/run"]
+    assert built()["mounts"] == []
 
 
 def test_without_a_credential_the_spec_carries_only_the_isolation() -> None:
@@ -138,7 +142,7 @@ def test_the_credential_reaches_the_container_under_its_one_name(
 @pytest.fixture
 def root(tmp_path: Path) -> Path:
     (tmp_path / "workdirs" / "repo").mkdir(parents=True)
-    (tmp_path / "runs").mkdir()
+    (tmp_path / "other").mkdir()
     return tmp_path
 
 
@@ -158,8 +162,8 @@ def test_a_link_inside_workdirs_resolves_to_its_target(root: Path) -> None:
     "workdir",
     [
         "workdirs",
-        "runs",
-        "workdirs/../runs",
+        "other",
+        "workdirs/../other",
         "workdirs/missing",
         "workdirs/outside",
         "workdirs/file",

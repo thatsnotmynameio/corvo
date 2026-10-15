@@ -6,28 +6,34 @@ mounts and memory, CPU and process limits, starts, and the limits apply
 inside it.
 
 It is also the gate of the request's transport (the agent-request-stdin
-plan's U1): a request written to the container's standard input, through
-docker-py's attach socket, arrives whole, and the same socket brings back
-what the container writes to its stdout and stderr.
+plan's U1): through the container piece's own attach, a request written to
+the container's stdin arrives whole, and the same socket brings back what
+the container writes to its stdout and stderr, each apart and whole.
 """
 
 import hashlib
 import json
-import socket
-import struct
 import threading
 import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
+import docker
 import pytest
+from docker import DockerClient
 from docker.models.containers import Container
-from docker.types import LogConfig
 
+from corvo.agents.frame import MAX_UNTRUSTED_BYTES, encode
+from corvo.worker.agent_runtime import containers
+from corvo.worker.agent_runtime.containers import (
+    DRAIN_TIMEOUT,
+    PODMAN_TIMEOUT,
+    STDERR,
+    STDOUT,
+    Attachment,
+)
 from corvo.worker.agent_runtime.spec import MANAGED, container_spec
 from corvo.worker.defaults import AGENT_MEMORY
 
@@ -65,95 +71,10 @@ print(json.dumps({
 }))
 """
 
-
-@pytest.fixture(scope="module")
-def image(podman: Podman) -> str:
-    podman.client.images.pull(IMAGE)
-    return IMAGE
-
-
-@pytest.fixture
-def run_dir(podman: Podman) -> Iterator[Path]:
-    path = podman.root / f"test-{uuid.uuid4().hex[:8]}"
-    path.mkdir()
-    yield path
-    path.rmdir()
-
-
-def agent_container(
-    image: str, command: list[str], run_dir: Path, **labels: str
-) -> dict[str, Any]:
-    """The container piece's spec for a container of the tests' own."""
-    return container_spec(
-        image=image,
-        name=f"corvo-test-{uuid.uuid4().hex[:8]}",
-        labels={"corvo.managed": "true", **labels},
-        command=command,
-        run_dir=run_dir,
-    )
-
-
-def test_the_hardened_container_applies_its_limits(
-    podman: Podman, image: str, run_dir: Path
-) -> None:
-    container = podman.client.containers.run(
-        detach=True, **agent_container(image, ["python", "-c", PROBE], run_dir)
-    )
-    try:
-        assert container.wait(timeout=60)["StatusCode"] == 0
-        report = json.loads(container.logs(stderr=False))
-    finally:
-        container.remove(force=True)
-
-    assert report == {
-        "memory.max": str(AGENT_MEMORY),
-        "cpu.max": "100000 100000",
-        "pids.max": "256",
-        "CapEff": "0000000000000000",
-        "root writable": False,
-        "tmp writable": True,
-    }
-
-
-def test_positive_label_filters_find_the_deployment(
-    podman: Podman, image: str, run_dir: Path
-) -> None:
-    container = podman.client.containers.create(
-        **agent_container(image, ["true"], run_dir, **{"corvo.deployment": "x"})
-    )
-
-    def listed(deployment: str) -> list[str | None]:
-        filters: dict[str, str | list[str] | bool] = {
-            "label": [MANAGED, f"corvo.deployment={deployment}"]
-        }
-        return [c.id for c in podman.client.containers.list(all=True, filters=filters)]
-
-    try:
-        assert container.id in listed("x")
-        assert container.id not in listed("y")
-    finally:
-        container.remove(force=True)
-
-
-def test_kill_and_force_remove_leave_no_container(
-    podman: Podman, image: str, run_dir: Path
-) -> None:
-    settings = agent_container(image, ["sleep", "300"], run_dir)
-    container = podman.client.containers.run(detach=True, **settings)
-    container.kill()
-    container.remove(force=True)
-
-    left = podman.client.containers.list(all=True, filters={"name": settings["name"]})
-    assert left == []
-
-
-# The largest request the runner accepts, which is the envelope's cap.
-MAX_REQUEST = 1024 * 1024
-
 # Reads one request from its stdin, framed as its decimal length and a
 # newline, after <delay> seconds and under a total <deadline>, then writes
-# what <output> names. Its report says how the read ended: whole, at the
-# end of input, or at the deadline.
+# what <output> names. It exits with how the read ended: 0 whole, 3 at the
+# end of input, 4 at the deadline.
 READER = r"""
 import hashlib, json, os, select, sys, threading, time
 
@@ -209,25 +130,39 @@ elif output == "interleaved":
 elif output == "chatter":
     chatting.join()
     write(1, b"%d\n" % len(report) + report)
+sys.exit({"whole": 0, "eof": 3, "deadline": 4}[outcome])
 """
+EOF, DEADLINE = 3, 4
 
 # What the reader's chatter writes to each stream.
 CHATTER_STDOUT = b"o" * 4096 * 256
 CHATTER_STDERR = b"e" * 4096 * 256
 
-# The bounds the transport is held to: the worker's write, and the time the
-# attach stream may take to end once the container has exited.
-WRITE_TIMEOUT = 45
-DRAIN_TIMEOUT = 5
-
-# The attach stream's frame header: the stream, three zero bytes and the
-# payload's length (docker-py's utils/socket.py).
-FRAME_HEADER = struct.Struct(">BxxxL")
-STDOUT, STDERR = 1, 2
+# The largest request: the 1 MiB the runner accepts, bytes 0 to 255 over.
+LARGEST = bytes(range(256)) * (MAX_UNTRUSTED_BYTES // 256)
 
 
-def framed(payload: bytes) -> bytes:
-    return b"%d\n" % len(payload) + payload
+@pytest.fixture(scope="module")
+def image(podman: Podman) -> str:
+    podman.client.images.pull(IMAGE)
+    return IMAGE
+
+
+def agent_container(image: str, command: list[str], **labels: str) -> dict[str, Any]:
+    """The container piece's spec for a container of the tests' own."""
+    return container_spec(
+        image=image,
+        name=f"corvo-test-{uuid.uuid4().hex[:8]}",
+        labels={"corvo.managed": "true", **labels},
+        command=command,
+    )
+
+
+def reader(
+    image: str, output: str, *, delay: float = 0, deadline: float = 30
+) -> dict[str, Any]:
+    command = ["python", "-c", READER, str(delay), str(deadline), output]
+    return agent_container(image, command)
 
 
 def report_of(payload: bytes) -> dict[str, Any]:
@@ -239,228 +174,196 @@ def report_of(payload: bytes) -> dict[str, Any]:
     }
 
 
-def reader_container(
-    image: str,
-    run_dir: Path,
-    output: str,
-    *,
-    delay: float = 0,
-    deadline: float = 30,
-    **settings: Any,
-) -> dict[str, Any]:
-    """The reader in an agent container whose stdin is open, with no tty."""
-    command = ["python", "-c", READER, str(delay), str(deadline), output]
-    spec = agent_container(image, command, run_dir)
-    return {**spec, "stdin_open": True, "tty": False, **settings}
-
-
-@dataclass
-class Attached:
-    container: Container
-    # The connection's socket, and the HTTP response docker-py read the
-    # attach's answer through, which holds the socket open until it is
-    # closed too.
-    sock: socket.socket
-    response: Any
-
-    def close(self) -> None:
-        try:
-            self.sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        self.response.close()
-        self.sock.close()
-
-
 @contextmanager
 def attached(
-    podman: Podman,
-    spec: dict[str, Any],
-    *,
-    output: bool,
-) -> Iterator[Attached]:
-    """A container created, attached to and started, in that order, and
-    removed on the way out. The attach takes stdin, and stdout and stderr
-    when <output> holds. Its detach keys are none, where docker-py would
-    otherwise send those of ~/.docker/config.json."""
-    container = podman.client.containers.create(**spec)
+    client: DockerClient, spec: dict[str, Any]
+) -> Iterator[tuple[Container, Attachment]]:
+    """A container created, attached to and started, in that order, as the
+    container piece does, and removed on the way out."""
+    container = client.containers.create(**spec)
+    attachment = Attachment()
     try:
-        params: dict[str, Any] = {"stdin": 1, "stream": 1, "detachKeys": ""}
-        if output:
-            params |= {"stdout": 1, "stderr": 1}
-        stream = podman.client.api.attach_socket(spec["name"], params=params)
-        connection = Attached(container, stream._sock, stream._response)
-        try:
-            container.start()
-            yield connection
-        finally:
-            connection.close()
+        attachment.open(client, spec["name"])
+        container.start()
+        yield container, attachment
+    finally:
+        attachment.close()
+        container.remove(force=True)
+
+
+def streams(
+    client: DockerClient, spec: dict[str, Any], request: bytes | None = None
+) -> dict[int, bytes]:
+    """Every frame's payload, joined by stream, of a container written
+    <request> while its output is read. The stream must end on its own
+    within DRAIN_TIMEOUT of the container's exit, with exit code 0."""
+    with attached(client, spec) as (container, attachment):
+        joined = {STDOUT: b"", STDERR: b""}
+
+        def read() -> None:
+            for stream, payload in attachment.frames():
+                joined[stream] += payload
+
+        reading = threading.Thread(target=read)
+        reading.start()
+        if request is not None:
+            attachment.write(request)
+        assert container.wait(timeout=60)["StatusCode"] == 0
+        reading.join(DRAIN_TIMEOUT)
+        assert not reading.is_alive(), "the stream outlived the container"
+    return joined
+
+
+def reported(client: DockerClient, spec: dict[str, Any], request: bytes) -> Any:
+    return json.loads(streams(client, spec, request)[STDOUT])
+
+
+def test_the_hardened_container_applies_its_limits(podman: Podman, image: str) -> None:
+    out = streams(podman.client, agent_container(image, ["python", "-c", PROBE]))
+
+    assert json.loads(out[STDOUT]) == {
+        "memory.max": str(AGENT_MEMORY),
+        "cpu.max": "100000 100000",
+        "pids.max": "256",
+        "CapEff": "0000000000000000",
+        "root writable": False,
+        "tmp writable": True,
+    }
+
+
+def test_positive_label_filters_find_the_deployment(podman: Podman, image: str) -> None:
+    container = podman.client.containers.create(
+        **agent_container(image, ["true"], **{"corvo.deployment": "x"})
+    )
+
+    def listed(deployment: str) -> list[str | None]:
+        filters: dict[str, str | list[str] | bool] = {
+            "label": [MANAGED, f"corvo.deployment={deployment}"]
+        }
+        return [c.id for c in podman.client.containers.list(all=True, filters=filters)]
+
+    try:
+        assert container.id in listed("x")
+        assert container.id not in listed("y")
     finally:
         container.remove(force=True)
 
 
-def send(connection: Attached, data: bytes, timeout: float = WRITE_TIMEOUT) -> None:
-    connection.sock.settimeout(timeout)
-    connection.sock.sendall(data)
+def test_kill_and_force_remove_leave_no_container(podman: Podman, image: str) -> None:
+    settings = agent_container(image, ["sleep", "300"])
+    container = podman.client.containers.run(detach=True, **settings)
+    container.kill()
+    container.remove(force=True)
 
-
-def received(sock: socket.socket, size: int) -> bytes | None:
-    """Exactly <size> bytes, or None when the stream ends first."""
-    data = b""
-    while len(data) < size:
-        chunk = sock.recv(size - len(data))
-        if not chunk:
-            return None
-        data += chunk
-    return data
-
-
-def streams(sock: socket.socket) -> dict[int, bytes]:
-    """Every frame's payload until the stream ends, joined by stream."""
-    joined = {STDOUT: b"", STDERR: b""}
-    while (header := received(sock, FRAME_HEADER.size)) is not None:
-        kind, size = FRAME_HEADER.unpack(header)
-        payload = received(sock, size)
-        if payload is None:
-            break
-        joined[kind] += payload
-    return joined
-
-
-def logged_report(container: Container) -> dict[str, Any]:
-    assert container.wait(timeout=60)["StatusCode"] == 0
-    report: dict[str, Any] = json.loads(container.logs(stdout=True, stderr=False))
-    return report
-
-
-def run_attached(
-    podman: Podman, spec: dict[str, Any], request: bytes
-) -> dict[int, bytes]:
-    """The streams of a container attached to with stdin, stdout and stderr,
-    written <request> while they are read. The stream must end within
-    DRAIN_TIMEOUT of the container's exit."""
-    with attached(podman, spec, output=True) as connection:
-        connection.sock.settimeout(WRITE_TIMEOUT)
-        result: dict[int, bytes] = {}
-        reader = threading.Thread(
-            target=lambda: result.update(streams(connection.sock))
-        )
-        reader.start()
-        connection.sock.sendall(request)
-        assert connection.container.wait(timeout=60)["StatusCode"] == 0
-        reader.join(DRAIN_TIMEOUT)
-        assert not reader.is_alive(), "the stream outlived the container"
-    return result
+    left = podman.client.containers.list(all=True, filters={"name": settings["name"]})
+    assert left == []
 
 
 # The request's direction.
 
 
 def test_a_request_of_the_largest_size_arrives_whole(
-    podman: Podman, image: str, run_dir: Path
+    podman: Podman, image: str
 ) -> None:
-    payload = bytes(range(256)) * (MAX_REQUEST // 256)
-    spec = reader_container(image, run_dir, "report")
-    with attached(podman, spec, output=False) as connection:
-        send(connection, framed(payload))
-        assert logged_report(connection.container) == report_of(payload)
+    spec = reader(image, "report")
+
+    assert reported(podman.client, spec, encode(LARGEST)) == report_of(LARGEST)
 
 
 def test_a_request_past_the_pipe_buffers_waits_for_a_late_reader(
-    podman: Podman, image: str, run_dir: Path
+    podman: Podman, image: str
 ) -> None:
     payload = b"x" * (256 * 1024)
-    spec = reader_container(image, run_dir, "report", delay=2)
-    with attached(podman, spec, output=False) as connection:
-        send(connection, framed(payload))
-        assert logged_report(connection.container) == report_of(payload)
+    spec = reader(image, "report", delay=2)
+
+    assert reported(podman.client, spec, encode(payload)) == report_of(payload)
 
 
-def test_bytes_written_before_the_read_are_kept(
-    podman: Podman, image: str, run_dir: Path
+def test_a_late_reader_outlasts_the_clients_own_timeout(
+    podman: Podman, image: str
 ) -> None:
+    # The worker's client, whose timeout the attach's socket inherits.
+    client = docker.DockerClient(
+        base_url=f"unix://{podman.socket}", timeout=PODMAN_TIMEOUT
+    )
+    payload = b"x" * (512 * 1024)
+    spec = reader(image, "report", delay=PODMAN_TIMEOUT + 2)
+    try:
+        assert reported(client, spec, encode(payload)) == report_of(payload)
+    finally:
+        client.close()
+
+
+def test_bytes_written_before_the_read_are_kept(podman: Podman, image: str) -> None:
     payload = b'{"agent": "tone"}'
-    spec = reader_container(image, run_dir, "report", delay=3)
-    with attached(podman, spec, output=False) as connection:
-        send(connection, framed(payload))
-        assert logged_report(connection.container) == report_of(payload)
+    spec = reader(image, "report", delay=3)
+
+    assert reported(podman.client, spec, encode(payload)) == report_of(payload)
 
 
 def test_a_request_holding_ctrl_p_ctrl_q_arrives_whole(
-    podman: Podman, image: str, run_dir: Path
+    podman: Podman, image: str
 ) -> None:
     payload = b"a" * 100 + b"\x10\x11" + b"b" * 100
-    spec = reader_container(image, run_dir, "report", deadline=5)
-    with attached(podman, spec, output=False) as connection:
-        send(connection, framed(payload))
-        assert logged_report(connection.container) == report_of(payload)
+    spec = reader(image, "report", deadline=5)
+
+    assert reported(podman.client, spec, encode(payload)) == report_of(payload)
 
 
 def test_a_container_that_never_reads_times_the_write_out(
-    podman: Podman, image: str, run_dir: Path
+    podman: Podman, image: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    spec = {**agent_container(image, ["sleep", "300"], run_dir), "stdin_open": True}
-    with attached(podman, spec, output=False) as connection:
+    monkeypatch.setattr(containers, "REQUEST_WRITE_TIMEOUT", 3)
+    spec = agent_container(image, ["sleep", "300"])
+    with attached(podman.client, spec) as (_, attachment):
         started = time.monotonic()
         with pytest.raises(TimeoutError):
-            send(connection, framed(b"x" * MAX_REQUEST), timeout=3)
+            attachment.write(encode(LARGEST))
         assert time.monotonic() - started < 10
     left = podman.client.containers.list(all=True, filters={"name": spec["name"]})
     assert left == []
 
 
 def test_a_dropped_connection_ends_the_read_within_its_deadline(
-    podman: Podman, image: str, run_dir: Path
+    podman: Podman, image: str
 ) -> None:
-    spec = reader_container(image, run_dir, "report", deadline=10)
-    with attached(podman, spec, output=False) as connection:
-        send(connection, b"%d\n" % MAX_REQUEST + b"x" * (100 * 1024))
-        connection.close()
+    spec = reader(image, "report", deadline=10)
+    with attached(podman.client, spec) as (container, attachment):
+        attachment.write(b"%d\n" % MAX_UNTRUSTED_BYTES + b"x" * (100 * 1024))
+        attachment.close()
         started = time.monotonic()
-        report = logged_report(connection.container)
+        exit_code = container.wait(timeout=60)["StatusCode"]
         assert time.monotonic() - started < 15
-    assert report["outcome"] in {"eof", "deadline"}
-    assert report["length"] < MAX_REQUEST
+    assert exit_code in (EOF, DEADLINE)
 
 
 # The result's direction.
 
 
 def test_a_result_written_just_before_exit_arrives_whole(
-    podman: Podman, image: str, run_dir: Path
+    podman: Podman, image: str
 ) -> None:
-    spec = reader_container(image, run_dir, "blob")
-    out = run_attached(podman, spec, framed(b"{}"))
-    assert out == {STDOUT: framed(bytes(range(256)) * 4096), STDERR: b""}
+    out = streams(podman.client, reader(image, "blob"), encode(b"{}"))
+
+    assert out == {STDOUT: encode(bytes(range(256)) * 4096), STDERR: b""}
 
 
-def test_a_line_past_conmons_buffer_arrives_unsplit(
-    podman: Podman, image: str, run_dir: Path
-) -> None:
-    spec = reader_container(image, run_dir, "line")
-    out = run_attached(podman, spec, framed(b"{}"))
+def test_a_line_past_conmons_buffer_arrives_unsplit(podman: Podman, image: str) -> None:
+    out = streams(podman.client, reader(image, "line"), encode(b"{}"))
+
     assert out == {STDOUT: b"a" * 20000 + b"\n", STDERR: b""}
 
 
-@pytest.mark.parametrize("log_driver", [None, "none"])
-def test_stdout_and_stderr_arrive_apart(
-    podman: Podman, image: str, run_dir: Path, log_driver: str | None
-) -> None:
-    settings: dict[str, Any] = (
-        {} if log_driver is None else {"log_config": LogConfig(type=log_driver)}
-    )
-    spec = reader_container(image, run_dir, "interleaved", **settings)
-    out = run_attached(podman, spec, framed(b"{}"))
+def test_stdout_and_stderr_arrive_apart(podman: Podman, image: str) -> None:
+    out = streams(podman.client, reader(image, "interleaved"), encode(b"{}"))
+
     assert out == {STDOUT: CHATTER_STDOUT, STDERR: CHATTER_STDERR}
 
 
 def test_a_request_and_a_result_cross_on_one_connection(
-    podman: Podman, image: str, run_dir: Path
+    podman: Podman, image: str
 ) -> None:
-    payload = bytes(range(256)) * (MAX_REQUEST // 256)
-    spec = reader_container(
-        image, run_dir, "chatter", log_config=LogConfig(type="none")
-    )
-    out = run_attached(podman, spec, framed(payload))
-    report = json.dumps(report_of(payload)).encode()
-    assert out == {STDOUT: CHATTER_STDOUT + framed(report), STDERR: CHATTER_STDERR}
+    out = streams(podman.client, reader(image, "chatter"), encode(LARGEST))
+
+    report = encode(json.dumps(report_of(LARGEST)).encode())
+    assert out == {STDOUT: CHATTER_STDOUT + report, STDERR: CHATTER_STDERR}

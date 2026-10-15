@@ -32,14 +32,15 @@ EXPOSE 8000
 CMD ["uvicorn", "corvo.server.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # The image every agent container runs, built into the agents' Podman store
-# with `podman build --target agent`. The container mounts the run directory
-# at /corvo/run, the working directory, if any, at /workspace, and tmpfs
-# over /tmp and /home/agent, on a read-only root.
+# with `podman build --target agent`. The container gets its request on
+# stdin and frames its envelope on stdout, mounts the working directory, if
+# any, at /workspace, and tmpfs over /tmp and /home/agent, on a read-only
+# root.
 FROM app AS agent
 
 ENV HOME=/home/agent
 
-RUN mkdir -p /home/agent /corvo/run
+RUN mkdir -p /home/agent
 
 # Empty in the image: an agent without a working directory runs here.
 WORKDIR /workspace
