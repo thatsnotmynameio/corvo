@@ -12,6 +12,7 @@ requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
     "asyncpg>=0.32.0",
+    "claude-agent-sdk==0.2.167",
     "docker>=7.2.0",
     "fastapi>=0.143.0",
     "hatchet-sdk>=1.42.1",
