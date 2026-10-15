@@ -41,3 +41,11 @@ def test_the_fake_cli_marker_keeps_the_real_transport() -> None:
     connect = SubprocessCLITransport.connect
 
     assert connect.__qualname__ == "SubprocessCLITransport.connect"
+
+
+@pytest.mark.fake_cli
+class TestMarkedClass:
+    def test_a_mark_on_the_class_keeps_the_guard(self) -> None:
+        connect = SubprocessCLITransport.connect
+
+        assert connect.__qualname__ != "SubprocessCLITransport.connect"
