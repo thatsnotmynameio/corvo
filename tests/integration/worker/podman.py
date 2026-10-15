@@ -19,10 +19,7 @@ import docker
 from docker import DockerClient
 from docker.errors import DockerException
 
-# The label every container the agents start carries, and that teardown
-# removes by.
-MANAGED_KEY = "corvo.managed"
-MANAGED = f"{MANAGED_KEY}=true"
+from corvo.worker.agent_runtime.spec import MANAGED
 
 
 def podman_available() -> bool:

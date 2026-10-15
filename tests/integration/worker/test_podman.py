@@ -1,24 +1,27 @@
 """The proof that rootless Podman runs the agents' container as KTD6 specifies.
 
-Every later agent unit leans on it: a container with every capability
-dropped, a read-only root, size-limited tmpfs mounts and memory, CPU and
-process limits starts, and the limits apply inside it. The flags are written
-out here, since there is no container piece yet; its spec replaces them.
+Every agent run leans on it: a container built by the container piece's own
+spec, with every capability dropped, a read-only root, size-limited tmpfs
+mounts and memory, CPU and process limits, starts, and the limits apply
+inside it.
 """
 
 import json
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
-from docker import DockerClient
 
-from .podman import MANAGED, MANAGED_KEY
+from corvo.worker.agent_runtime.spec import MANAGED, container_spec
+from corvo.worker.defaults import AGENT_MEMORY
+
+from .conftest import Podman
 
 # The Python the app's image is built on, named in full: Podman resolves no
 # short name without a registries.conf that allows it.
 IMAGE = "docker.io/library/python:3.14.7-slim"
-GIB = 1024**3
 
 # What the agents' container reports from inside it: its cgroup's limits, its
 # effective capabilities, and whether the root and /tmp take a write.
@@ -50,37 +53,37 @@ print(json.dumps({
 
 
 @pytest.fixture(scope="module")
-def image(podman: DockerClient) -> str:
-    podman.images.pull(IMAGE)
+def image(podman: Podman) -> str:
+    podman.client.images.pull(IMAGE)
     return IMAGE
 
 
-def agent_container(**labels: str) -> dict[str, Any]:
-    """docker-py's arguments for a container with KTD6's hardening and
-    limits, and the managed label teardown removes it by."""
-    return {
-        "cap_drop": ["ALL"],
-        "security_opt": ["no-new-privileges"],
-        "read_only": True,
-        "init": True,
-        "tmpfs": {
-            "/tmp": "rw,noexec,nosuid,nodev,size=100m",
-            "/home/agent": "rw,noexec,nosuid,nodev,size=500m",
-        },
-        "mem_limit": 2 * GIB,
-        "memswap_limit": 2 * GIB,
-        "nano_cpus": 1_000_000_000,
-        "pids_limit": 256,
-        "labels": {MANAGED_KEY: "true", **labels},
-        "name": f"corvo-test-{uuid.uuid4().hex[:8]}",
-    }
+@pytest.fixture
+def run_dir(podman: Podman) -> Iterator[Path]:
+    path = podman.root / f"test-{uuid.uuid4().hex[:8]}"
+    path.mkdir()
+    yield path
+    path.rmdir()
+
+
+def agent_container(
+    image: str, command: list[str], run_dir: Path, **labels: str
+) -> dict[str, Any]:
+    """The container piece's spec for a container of the tests' own."""
+    return container_spec(
+        image=image,
+        name=f"corvo-test-{uuid.uuid4().hex[:8]}",
+        labels={"corvo.managed": "true", **labels},
+        command=command,
+        run_dir=run_dir,
+    )
 
 
 def test_the_hardened_container_applies_its_limits(
-    podman: DockerClient, image: str
+    podman: Podman, image: str, run_dir: Path
 ) -> None:
-    container = podman.containers.run(
-        image, ["python", "-c", PROBE], detach=True, **agent_container()
+    container = podman.client.containers.run(
+        detach=True, **agent_container(image, ["python", "-c", PROBE], run_dir)
     )
     try:
         assert container.wait(timeout=60)["StatusCode"] == 0
@@ -89,7 +92,7 @@ def test_the_hardened_container_applies_its_limits(
         container.remove(force=True)
 
     assert report == {
-        "memory.max": str(2 * GIB),
+        "memory.max": str(AGENT_MEMORY),
         "cpu.max": "100000 100000",
         "pids.max": "256",
         "CapEff": "0000000000000000",
@@ -99,17 +102,17 @@ def test_the_hardened_container_applies_its_limits(
 
 
 def test_positive_label_filters_find_the_deployment(
-    podman: DockerClient, image: str
+    podman: Podman, image: str, run_dir: Path
 ) -> None:
-    container = podman.containers.create(
-        image, ["true"], **agent_container(**{"corvo.deployment": "x"})
+    container = podman.client.containers.create(
+        **agent_container(image, ["true"], run_dir, **{"corvo.deployment": "x"})
     )
 
     def listed(deployment: str) -> list[str | None]:
         filters: dict[str, str | list[str] | bool] = {
             "label": [MANAGED, f"corvo.deployment={deployment}"]
         }
-        return [c.id for c in podman.containers.list(all=True, filters=filters)]
+        return [c.id for c in podman.client.containers.list(all=True, filters=filters)]
 
     try:
         assert container.id in listed("x")
@@ -119,12 +122,12 @@ def test_positive_label_filters_find_the_deployment(
 
 
 def test_kill_and_force_remove_leave_no_container(
-    podman: DockerClient, image: str
+    podman: Podman, image: str, run_dir: Path
 ) -> None:
-    settings = agent_container()
-    container = podman.containers.run(image, ["sleep", "300"], detach=True, **settings)
+    settings = agent_container(image, ["sleep", "300"], run_dir)
+    container = podman.client.containers.run(detach=True, **settings)
     container.kill()
     container.remove(force=True)
 
-    left = podman.containers.list(all=True, filters={"name": settings["name"]})
+    left = podman.client.containers.list(all=True, filters={"name": settings["name"]})
     assert left == []
