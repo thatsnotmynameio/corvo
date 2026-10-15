@@ -54,7 +54,12 @@ async def outcome(run_dir: Path) -> Succeeded | Failed:
         request = AgentRequest.model_validate_json(
             (run_dir / "request.json").read_bytes()
         )
-    except OSError, ValidationError:
+    # Two clauses, not one with two types: the organization's coverage check
+    # parses this file with a Python older than 3.14, which needs parentheses
+    # there, and ruff removes them for 3.14.
+    except OSError:
+        return Failed(reason="invalid_request", report=RunReport())
+    except ValidationError:
         return Failed(reason="invalid_request", report=RunReport())
 
     package = f"corvo.agents.{request.agent}"

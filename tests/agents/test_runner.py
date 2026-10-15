@@ -128,6 +128,12 @@ async def test_a_package_outside_corvo_agents_is_refused(tmp_path: Path) -> None
     assert envelope(tmp_path) == Failed(reason="invalid_request", report=RunReport())
 
 
+async def test_a_missing_request_fails_the_run(tmp_path: Path) -> None:
+    await runner.execute(tmp_path)
+
+    assert envelope(tmp_path) == Failed(reason="invalid_request", report=RunReport())
+
+
 async def test_an_input_the_agent_rejects_fails_the_run(tmp_path: Path) -> None:
     request(tmp_path, text="")
 
