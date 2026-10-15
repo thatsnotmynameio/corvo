@@ -54,17 +54,20 @@ def reply(turn: dict[str, Any], results: list[str]) -> tuple[list[Any], str]:
     if "tool_use" in turn:
         blocks = [
             (
-                {"type": "tool_use", "id": f"toolu_{index}", "name": call["name"]}
-                | {"input": {}},
+                {
+                    "type": "tool_use",
+                    "id": f"toolu_{index}",
+                    "name": call["name"],
+                    "input": {},
+                },
                 {"type": "input_json_delta", "partial_json": json.dumps(call["input"])},
             )
             for index, call in enumerate(turn["tool_use"])
         ]
         return blocks, "tool_use"
     text = turn["text"].replace("{tool_results}", "\n".join(results))
-    return [({"type": "text", "text": ""}, {"type": "text_delta", "text": text})], (
-        "end_turn"
-    )
+    block = ({"type": "text", "text": ""}, {"type": "text_delta", "text": text})
+    return [block], "end_turn"
 
 
 def events(blocks: list[Any], stop: str) -> Iterator[tuple[str, dict[str, Any]]]:

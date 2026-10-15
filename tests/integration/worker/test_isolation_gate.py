@@ -83,7 +83,8 @@ def run(options: list[str], *command: str) -> subprocess.CompletedProcess[str]:
 
 def lift_apparmor(options: list[str]) -> list[str]:
     """KTD15's CI-only branch: each adjustment, in order, until bubblewrap
-    starts. Returns the adjustments it needed."""
+    starts. It appends apparmor=unconfined to options when that is needed,
+    and returns the adjustments it made."""
     adjustments: list[str] = []
     started = run(options, *BUBBLEWRAP)
     if started.returncode == 0:

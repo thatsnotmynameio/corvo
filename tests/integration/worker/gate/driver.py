@@ -133,7 +133,7 @@ def run_cgroup(name: str, memory: int, pids: int) -> Path:
     return path
 
 
-def sandbox_env(cgroup: Path, engine: str) -> dict[str, str]:
+def run_env(cgroup: Path, engine: str) -> dict[str, str]:
     """What the session piece puts in options.env for a run without a working
     directory."""
     return {
@@ -151,7 +151,7 @@ def probe() -> Any:
     settings = json.dumps({"sandbox": SANDBOX})
     ran = subprocess.run(
         [WRAPPER, "--settings", settings],
-        env={**os.environ, **sandbox_env(cgroup, str(HERE / "probe.py"))},
+        env={**os.environ, **run_env(cgroup, str(HERE / "probe.py"))},
         capture_output=True,
         text=True,
         timeout=60,
@@ -209,7 +209,7 @@ async def session(directory: Path) -> dict[str, Any]:
         model="claude-haiku-5-5",
         max_turns=3,
         env={
-            **sandbox_env(run_cgroup("run-gate-session", 1024 * MIB, 256), ENGINE),
+            **run_env(run_cgroup("run-gate-session", 1024 * MIB, 256), ENGINE),
             "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
         },
         sandbox=SANDBOX,
@@ -250,6 +250,12 @@ async def without_cli_path() -> str:
     return "no error"
 
 
+def cgroup_events(path: Path) -> dict[str, int]:
+    """A cgroup's memory.events or pids.events, as counts by name."""
+    lines = path.read_text().splitlines()
+    return {key: int(value) for key, value in (line.split() for line in lines)}
+
+
 def hog() -> dict[str, Any]:
     cgroup = run_cgroup("run-gate-hog", 64 * MIB, 32)
     worker_cgroup = Path("/proc/self/cgroup").read_text()
@@ -260,18 +266,14 @@ def hog() -> dict[str, Any]:
         timeout=60,
     )
 
-    def events(path: Path) -> dict[str, int]:
-        lines = path.read_text().splitlines()
-        return {key: int(value) for key, value in (line.split() for line in lines)}
-
     return {
         "returncode": ran.returncode,
         "stdout": ran.stdout.split("\n")[:-1],
-        "memory.events": events(cgroup / "memory.events"),
-        "pids.events": events(cgroup / "pids.events"),
+        "memory.events": cgroup_events(cgroup / "memory.events"),
+        "pids.events": cgroup_events(cgroup / "pids.events"),
         "worker cgroup unchanged": Path("/proc/self/cgroup").read_text()
         == worker_cgroup,
-        "worker memory.events": events(AGENTS / "worker" / "memory.events"),
+        "worker memory.events": cgroup_events(AGENTS / "worker" / "memory.events"),
     }
 
 

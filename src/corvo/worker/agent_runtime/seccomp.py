@@ -28,13 +28,14 @@ PROFILE = HERE / "seccomp.json"
 BUBBLEWRAP_CALLS = ["clone", "unshare", "mount", "umount2", "pivot_root", "setns"]
 
 AF_NETLINK = 16
+AF_ALG = 38
 NETLINK_NETFILTER = 12
 
 # Docker's rule for the address families below AF_ALG, AF_NETLINK among them.
 UPSTREAM_SOCKET_RULE = {
     "names": ["socket"],
     "action": "SCMP_ACT_ALLOW",
-    "args": [{"index": 0, "value": 38, "op": "SCMP_CMP_LT"}],
+    "args": [{"index": 0, "value": AF_ALG, "op": "SCMP_CMP_LT"}],
 }
 
 # It becomes two: the families below AF_NETLINK with any protocol, and the
@@ -54,7 +55,7 @@ SOCKET_RULES = [
         "names": ["socket"],
         "action": "SCMP_ACT_ALLOW",
         "args": [
-            {"index": 0, "value": 38, "op": "SCMP_CMP_LT"},
+            {"index": 0, "value": AF_ALG, "op": "SCMP_CMP_LT"},
             {"index": 2, "value": NETLINK_NETFILTER, "op": "SCMP_CMP_NE"},
         ],
     },

@@ -35,7 +35,7 @@ def run_env(cgroup: Path, workdir: str = "", writes: str = "0") -> dict[str, str
         "CORVO_SANDBOX_ENGINE": ENGINE,
         "CORVO_SANDBOX_TMPFS": "104857600",
         "ANTHROPIC_BASE_URL": "http://claude-proxy:8080",
-        "CLAUDE_CODE_OAUTH_TOKEN": "corvo-placeholder",
+        "CLAUDE_CODE_OAUTH_TOKEN": sandbox.PLACEHOLDER,
         "CLAUDE_CODE_ENTRYPOINT": "sdk-py",
         "CLAUDE_AGENT_SDK_VERSION": "0.2.167",
         "CLAUDE_CODE_SDK_READS_SESSION_STATE": "1",
@@ -56,11 +56,11 @@ def cgroup(tmp_path: Path) -> Path:
     return path
 
 
-def start(
+def launch(
     monkeypatch: pytest.MonkeyPatch, env: dict[str, str], argv: Sequence[str]
-) -> Exec:
-    """Runs main over the worker's environment plus env, and returns the exec
-    it ends in."""
+) -> None:
+    """Runs main over the worker's environment plus env, with an exec that
+    raises Exec."""
 
     def execve(path: str, args: Sequence[str], exec_env: dict[str, str]) -> None:
         raise Exec(path, args, exec_env)
@@ -69,25 +69,24 @@ def start(
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(sys, "argv", ["corvo-agent-sandbox", *argv])
     monkeypatch.setattr(os, "execve", execve)
+    sandbox.main()
+
+
+def start(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], argv: Sequence[str]
+) -> Exec:
+    """The exec main ends in."""
     with pytest.raises(Exec) as started:
-        sandbox.main()
+        launch(monkeypatch, env, argv)
     return started.value
 
 
 def refused(
     monkeypatch: pytest.MonkeyPatch, env: dict[str, str], argv: Sequence[str]
 ) -> None:
-    """Runs main as start does, and checks it exits non-zero with no exec."""
-
-    def execve(path: str, args: Sequence[str], exec_env: dict[str, str]) -> None:
-        raise AssertionError(f"the wrapper started {path}")
-
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
-    monkeypatch.setattr(sys, "argv", ["corvo-agent-sandbox", *argv])
-    monkeypatch.setattr(os, "execve", execve)
+    """Checks main exits non-zero; an exec raises Exec, which fails the test."""
     with pytest.raises(SystemExit) as exited:
-        sandbox.main()
+        launch(monkeypatch, env, argv)
     assert exited.value.code != 0
 
 
