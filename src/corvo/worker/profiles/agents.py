@@ -1,3 +1,4 @@
+from corvo.worker.agents.tone import tone
 from corvo.worker.defaults import AGENT_MAX_RUNS
 from corvo.worker.profiles import Profile
 
@@ -7,6 +8,8 @@ from corvo.worker.profiles import Profile
 # run at once.
 PROFILE = Profile(
     name="corvo-agent-worker",
-    workflows=[],
+    workflows=[
+        tone,
+    ],
     slots=AGENT_MAX_RUNS,
 )
