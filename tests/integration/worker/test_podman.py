@@ -294,6 +294,22 @@ def test_a_late_reader_outlasts_the_clients_own_timeout(
         client.close()
 
 
+def test_output_after_the_clients_own_timeout_arrives_without_a_request(
+    podman: Podman, image: str
+) -> None:
+    # As the probe: nothing is written, so no write lifts the timeout.
+    client = docker.DockerClient(
+        base_url=f"unix://{podman.socket}", timeout=PODMAN_TIMEOUT
+    )
+    script = f"import time; time.sleep({PODMAN_TIMEOUT + 2}); print('late')"
+    try:
+        out = streams(client, agent_container(image, ["python", "-c", script]))
+    finally:
+        client.close()
+
+    assert out == {STDOUT: b"late\n", STDERR: b""}
+
+
 def test_bytes_written_before_the_read_are_kept(podman: Podman, image: str) -> None:
     payload = b'{"agent": "tone"}'
     spec = reader(image, "report", delay=3)

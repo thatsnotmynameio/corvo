@@ -375,6 +375,23 @@ async def test_a_container_that_exits_before_reading_fails_on_its_exit(
         await long_example.aio_mock_run(LongInput(text=LARGE))
 
 
+async def test_a_session_quiet_past_the_write_bound_still_answers(
+    podman: FakeClient, logged: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(containers, "REQUEST_WRITE_TIMEOUT", 0.2)
+    behaviour = podman.behaviour
+
+    def slow(request: bytes) -> Exit:
+        time.sleep(0.6)
+        return behaviour(request)
+
+    podman.behaviour = slow
+
+    output = await example.aio_mock_run(ToneInput(text="Thanks!"))
+
+    assert output.friendly
+
+
 async def test_a_container_that_never_reads_fails_within_the_write_bound(
     podman: FakeClient, logged: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -95,8 +95,8 @@ MAX_KEPT = MAX_UNTRUSTED_BYTES + MAX_HEADER
 # How long one Podman API call may take: below CLEANUP_TIMEOUT, so a create
 # that cleanup waits for returns while cleanup can still remove its
 # container. docker-py's own default is 60 seconds. Its wait drops the
-# timeout, and the attach's reads lift it, so a session may stay silent for
-# longer.
+# timeout, and the attach's reads have none, so a session may stay silent
+# for longer.
 PODMAN_TIMEOUT = 10
 
 NOT_CONFIGURED = "agents are not configured"
@@ -247,19 +247,24 @@ class Attachment:
         self.closed = False
 
     def open(self, client: DockerClient, container: str) -> None:
+        """Attaches with no timeout on the socket for the reads: a session,
+        or the probe, may stay silent for longer. docker-py 7.2 already
+        returns it so; the lift keeps that whatever the version."""
         stream = client.api.attach_socket(container, params=ATTACH)
         with self.lock:
             self.sock, self.response = stream._sock, stream._response
+            self.sock.settimeout(None)
             if self.closed:
                 self.shut()
 
     def write(self, data: bytes) -> None:
-        """Sends data within REQUEST_WRITE_TIMEOUT, then lifts the timeout
-        the socket has from the client, for the reads."""
+        """Sends data within REQUEST_WRITE_TIMEOUT."""
         assert self.sock is not None
         self.sock.settimeout(REQUEST_WRITE_TIMEOUT)
-        self.sock.sendall(data)
-        self.sock.settimeout(None)
+        try:
+            self.sock.sendall(data)
+        finally:
+            self.sock.settimeout(None)
 
     def frames(self) -> Iterator[tuple[int, bytes]]:
         """Each frame's stream and payload, until the stream ends or fails."""
