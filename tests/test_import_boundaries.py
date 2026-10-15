@@ -113,10 +113,6 @@ def problems(sources: Mapping[str, str]) -> list[str]:
     }
 
     for module, names in direct.items():
-        if not within(module, "corvo.agents"):
-            found += crossing(
-                module, names, SDK, "only corvo.agents imports the Claude Agent SDK"
-            )
         if within(module, "corvo.agents"):
             for banned in ("hatchet_sdk", "corvo.worker"):
                 found += crossing(
@@ -125,6 +121,10 @@ def problems(sources: Mapping[str, str]) -> list[str]:
                     banned,
                     "corvo.agents imports neither Hatchet nor corvo.worker",
                 )
+        else:
+            found += crossing(
+                module, names, SDK, "only corvo.agents imports the Claude Agent SDK"
+            )
         if within(module, "corvo.core"):
             for banned in ("corvo.agents", SDK):
                 found += crossing(
