@@ -374,3 +374,19 @@ def test_the_envelope_reader_reads_a_regular_file(tmp_path: Path) -> None:
     path.write_text(json.dumps({"a": 1}))
 
     assert containers.read_untrusted(path) == b'{"a": 1}'
+
+
+async def test_a_container_removed_mid_run_fails_on_its_missing_envelope(
+    podman: FakeClient, logged: list[str]
+) -> None:
+    podman.behaviour = lambda run_dir: Exit(hangs=True)
+    run = asyncio.create_task(example.aio_mock_run(ToneInput(text="Thanks!")))
+    while not (podman.containers.made and podman.containers.made[0].started):
+        await asyncio.sleep(0.01)
+
+    # As the SIGTERM hook does.
+    await containers.remove_in_flight(cast(Runtime, containers.state))
+
+    with pytest.raises(AgentFailed, match="no envelope"):
+        await run
+    assert any("exit_code=unknown" in line for line in logged)

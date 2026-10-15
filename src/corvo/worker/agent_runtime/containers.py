@@ -225,14 +225,19 @@ def forward_stderr(chunks: Iterable[bytes], log: Callable[[str], None]) -> None:
         send(pending)
 
 
-def follow(container: Container, log: Callable[[str], None]) -> tuple[int, bool]:
+def follow(container: Container, log: Callable[[str], None]) -> tuple[int | None, bool]:
     """Forwards the container's stderr until it exits, then gives its exit
-    code and whether the kernel killed it for lack of memory."""
+    code and whether the kernel killed it for lack of memory. The exit code
+    is None when the container was removed before it exited, as the SIGTERM
+    hook removes it."""
     forward_stderr(
         container.logs(stream=True, follow=True, stdout=False, stderr=True), log
     )
-    exit_code = container.wait()["StatusCode"]
-    container.reload()
+    try:
+        exit_code = container.wait()["StatusCode"]
+        container.reload()
+    except NotFound:
+        return None, False
     return exit_code, bool(container.attrs["State"].get("OOMKilled"))
 
 
@@ -249,7 +254,7 @@ def describe(report: RunReport) -> str:
 def conclude[T: BaseModel](
     agent: str,
     run_dir: Path,
-    exit_code: int,
+    exit_code: int | None,
     oom_killed: bool,
     output: type[T],
     log: Callable[[str], None],
@@ -269,12 +274,13 @@ def conclude[T: BaseModel](
     except ValidationError:
         problem = "invalid envelope"
     if envelope is None:
+        code = "unknown" if exit_code is None else exit_code
         log(
             f"agent {agent}: {problem}, {describe(RunReport())} "
-            f"exit_code={exit_code} oom_killed={oom_killed}"
+            f"exit_code={code} oom_killed={oom_killed}"
         )
         raise AgentFailed(
-            f"agent {agent} left {problem} (exit code {exit_code}, "
+            f"agent {agent} left {problem} (exit code {code}, "
             f"killed for lack of memory: {oom_killed})"
         )
 
