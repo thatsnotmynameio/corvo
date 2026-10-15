@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # The socket of the rootless Podman that runs the agents' containers.
     # Empty, like an empty agent_root, leaves agents not configured.
     agent_podman_socket: str = ""
-    # The directory each agent run's working and run directories live under.
+    # The directory the agents' working directories live under, in workdirs.
     agent_root: str = ""
     # The agent image, built into that Podman's store with --target agent.
     agent_image: str = "localhost/corvo-agent:latest"

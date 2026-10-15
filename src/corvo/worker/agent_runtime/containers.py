@@ -43,6 +43,7 @@ from pydantic import BaseModel, ValidationError
 
 from corvo.agents.envelope import ENVELOPE, AgentRequest, Failed, RunReport, Succeeded
 from corvo.agents.frame import (
+    CHUNK,
     MAX_HEADER,
     MAX_UNTRUSTED_BYTES,
     FrameError,
@@ -222,7 +223,7 @@ def received(sock: socket.socket, size: int) -> bytes | None:
     """Exactly size bytes, or None when the stream ends first."""
     data = bytearray()
     while len(data) < size:
-        chunk = sock.recv(size - len(data))
+        chunk = sock.recv(min(size - len(data), CHUNK))
         if not chunk:
             return None
         data += chunk
