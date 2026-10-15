@@ -4,6 +4,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 import uuid
@@ -11,7 +12,10 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from docker import DockerClient
 from hatchet_sdk import ClientConfig, ClientTLSConfig, Hatchet
+
+from .podman import describe, podman_available, podman_service, user_session_env
 
 ROOT = Path(__file__).parents[3]
 # The tenant hatchet-admin quickstart creates, in Hatchet's Docker Compose
@@ -163,3 +167,31 @@ def hatchet(hatchet_token: str) -> Hatchet:
             tls_config=ClientTLSConfig(strategy="none"),
         )
     )
+
+
+@pytest.fixture(scope="session")
+def podman(pytestconfig: pytest.Config) -> Iterator[DockerClient]:
+    """A client of the session's own rootless Podman, as the test user.
+
+    Its socket sits in an agent root of the session's, made with mkdtemp
+    rather than under pytest's temporary directories (KTD15). Without Podman
+    the tests that need it skip, but on CI, where Podman ships with the
+    runner, they fail.
+    """
+    if not podman_available():
+        if os.environ.get("CI"):
+            pytest.fail("Podman is not available on CI")
+        pytest.skip("Podman is not available")
+
+    env = {**os.environ, **user_session_env()}
+    # Written as the session runs, not captured: the pull request records
+    # which Podman and network each machine ran.
+    reporter = pytestconfig.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_line(describe(env))
+    root = Path(tempfile.mkdtemp(prefix="corvo-agents-"))
+    try:
+        with podman_service(root, env) as client:
+            yield client
+    finally:
+        shutil.rmtree(root)
