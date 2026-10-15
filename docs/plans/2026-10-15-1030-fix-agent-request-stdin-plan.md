@@ -140,9 +140,12 @@ Product Contract preservation: changed: R10 — it now covers every agent, not o
 
 ### Outstanding Questions
 
-**Deferred to Implementation**
+**Resolved by U1**
 
-- Which branch U1 selects (KTD5). The plan states both, and the units mark what each branch changes.
+- **U1 selects Branch A (KTD5).** Every request scenario and every result scenario passed on both supported versions, on repeated runs:
+  - **Podman 6.1.1 (local, rootless):** five full runs in a row, all passing.
+  - **Podman 4.9.3 (CI's integration job, Ubuntu 24.04):** the runs on d0a715f and 713f3fb, all passing.
+- **One expectation was refuted.** Without a tty, Podman 6.1.1 cut no request at ctrl-p ctrl-q, whether the attach sent `detachKeys=ctrl-p,ctrl-q`, an empty value or none. The scenario was therefore kept only in its positive form: a request holding those bytes arrives whole. KTD2 keeps `detachKeys=""`, because docker-py otherwise sends the detach keys of `~/.docker/config.json`.
 
 ### Sources / Research
 
@@ -273,7 +276,7 @@ U1 runs first and decides everything after it. Then U2 and U3, which are indepen
 **Test scenarios:**
 - Request at exactly 1 MiB arrives byte for byte.
 - Request over 64 KiB arrives whole when the reader starts reading 2 s after start.
-- Request containing the bytes 0x10 0x11 arrives whole with `detachKeys=""`. Without that parameter it is cut short, which shows why the parameter is needed.
+- Request containing the bytes 0x10 0x11 arrives whole with `detachKeys=""`. (The negative form was dropped: see Outstanding Questions.)
 - Bytes written right after start, before the process reads, are not lost.
 - A container that never reads makes the write time out within its bound, and removal still ends the container.
 - Dropping the worker's socket mid-write closes the container's stdin, and the reader's deadline fires.
