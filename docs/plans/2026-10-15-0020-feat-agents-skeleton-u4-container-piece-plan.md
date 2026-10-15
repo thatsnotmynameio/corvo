@@ -63,7 +63,7 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
 
 - R13. Each agent run executes in a fresh container started for that run. The agent's code runs inside the container and hands its structured output to the task, which then removes the container.
 - R14. Agent containers run on a rootless Podman under a dedicated host user, apart from the daemon that runs the compose stack. The worker stays a compose service and reaches Podman through that user's API socket, mounted into the worker's container and reachable by the worker's user through a shared group. When it starts, the worker checks that the host's cgroup controllers for memory, CPU and processes are available, and refuses agent runs when they are not.
-- R15. The agent container drops every capability, has a read-only root filesystem, runs under the default seccomp profile, and is limited in memory, CPU and processes. Besides size-limited tmpfs mounts for `/tmp` and the agent user's home, it receives only the run directory mount that carries the request and the result, the working directory mount, and the Claude credential. The working directory is mounted read-only unless the agent declares that it writes to it, and a directory an agent may have written is untrusted output: the worker runs no hooks, config or code from it.
+- R15. The agent container drops every capability, has a read-only root filesystem, runs under the default seccomp profile, and is limited in memory, CPU and processes. Besides size-limited tmpfs mounts for `/tmp` and the agent user's home, it receives only the working directory mount and the Claude credential, and it takes its request and hands back its result over its standard streams (agent-request-stdin plan, KTD6). The working directory is mounted read-only unless the agent declares that it writes to it, and a directory an agent may have written is untrusted output: the worker runs no hooks, config or code from it.
 - R16. When Hatchet times out or cancels an agent task, the task kills and removes its container. Every container carries labels with its run's ID and its Hatchet deployment (server and tenant). A worker that starts removes only containers of its own deployment whose run Hatchet reports as finished, failed or cancelled.
 - R17. One piece of the worker starts, waits on, reads and removes agent containers, and every agent task uses it.
 
@@ -115,18 +115,21 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
   - A test helper in `tests/agents/` asserts the isolation fields on the options an agent built. Every agent's unit test calls it, which keeps a corvo options builder out of the runtime code (R4).
 
   Governs R10, R11.
-- KTD4. **The container hands back a JSON envelope file, and the worker treats it as untrusted.**
-  - **The request.** The worker writes `request.json` into the run directory, holding the agent package, its input, and a session budget in seconds. The budget is `AGENT_EXECUTION_TIMEOUT` minus `AGENT_DEADLINE_MARGIN`, minus the time already passed since the task started. Hatchet's timer starts at assignment, so a deadline equal to the timeout would never fire before Hatchet's own.
+- KTD4. **The container hands back a JSON envelope framed on its stdout, and the worker treats it as untrusted.**
+  - **The request.** The worker writes the request to the container's stdin, holding the agent package, its input, and a session budget in seconds. The budget is `AGENT_EXECUTION_TIMEOUT` minus `AGENT_DEADLINE_MARGIN`, minus the time already passed since the task started. Hatchet's timer starts at assignment, so a deadline equal to the timeout would never fire before Hatchet's own.
+    - The request is framed by its length: an ASCII decimal length, a newline, then exactly that many bytes, at most 1 MiB. `corvo.agents.frame` holds the rule for both sides (agent-request-stdin plan, KTD1).
+    - The worker attaches to the created container before it starts, and writes the frame within `REQUEST_WRITE_TIMEOUT` (45 s). A container that never reads fails the run within that bound (agent-request-stdin plan, KTD2, KTD3).
+    - The runner reads the frame within `REQUEST_READ_TIMEOUT` (30 s), then points fd 0 at `/dev/null`. A request that does not arrive whole fails as `invalid_request` (agent-request-stdin plan, KTD4).
   - **Running the session.** The runner runs `run` under `asyncio.timeout` to that budget. Inside `run`, `corvo.agents.session.consume` keeps the last `ResultMessage` and catches `ResultError` and `ProcessError`. It prints the session ID to stderr when the init message arrives. The run succeeds only when the result is not an error, its subtype is `success`, and its `structured_output` validates.
-  - **The envelope.** The runner writes `result.json` atomically, to a temporary name and then a rename, holding:
+  - **The envelope.** The runner frames the envelope on a private copy of its stdout, and points fd 1 at stderr, so nothing else printed reaches the frame (agent-request-stdin plan, KTD6). It holds:
     - a protocol version;
     - `ok` or `failed`, with the output or the reason (`deadline` when the budget ran out);
     - the run report: subtype, turns, cost and session ID.
-  - **Reading the envelope.** After the container exits, the worker opens `result.json` non-blocking and without following symlinks, and checks with `fstat` that it is a regular file of at most 1 MiB before any read. A FIFO, a device or a directory named `result.json` can therefore never block a worker thread. The worker never echoes the file's content, and validates it with the envelope model. The probe's report (KTD10) is read the same way.
+  - **Reading the envelope.** The worker reads the attach stream. Stdout is kept up to one frame at the 1 MiB cap and drained past it, so the container never blocks. Reading continues until the stream ends, at most `DRAIN_TIMEOUT` (5 s) after the container exits (agent-request-stdin plan, KTD6). A missing or truncated frame is "no envelope". A bad header, an oversized frame or invalid JSON is "invalid envelope". The worker never echoes what it read, and validates it with the envelope model. The probe's report (KTD10) is read the same way.
   - **Failures.** A failed envelope, a missing or invalid one, or an out-of-memory kill fails the task. The worker logs the cost, turns and session ID from the validated envelope only. When no envelope exists, it logs them as `unknown`, with the exit code and the OOM flag.
-  - **Forwarding stderr.** The worker sends stderr lines to `ctx.log` behind a fixed `agent stderr:` prefix, so a line the agent prints can never pass for one of the worker's own. Each line is cut to 500 characters with control characters stripped, up to 900 lines (Hatchet keeps 1000).
+  - **Forwarding stderr.** The worker sends the stderr lines of the attach stream to `ctx.log` behind a fixed `agent stderr:` prefix, so a line the agent prints can never pass for one of the worker's own. Each line is cut to 500 characters with control characters stripped, up to 900 lines (Hatchet keeps 1000).
 
-  A file beats stdout because conmon can split long lines and Hatchet caps log lines. claude-code-action hands its results over through a file too. Governs R8, R13, R15.
+  The attach stream's stdout reaches the worker raw and never reaches Hatchet's log, and the runner's private stdout keeps anything else printed out of the frame (agent-request-stdin plan, KTD6). Governs R8, R13, R15.
 - KTD5. **The container piece talks to Podman through docker-py over the dedicated user's Docker-compatible socket.** Each blocking call runs in `asyncio.to_thread`, and `types-docker` types it. With no `keep-id`, the agent runs as uid 0 inside the container, which rootless Podman maps to the dedicated host user. Its files are therefore owned by that user, with every capability dropped and no-new-privileges. (session-settled: user-approved — chosen over aiodocker, a corvo client over Podman's libpod API with httpx, and podman-py: docker-py is the official SDK on the path Podman documents, aiodocker is unverified against Podman, and podman-py silently drops `nano_cpus` and rejects `tmpfs=`.) The choice stays inside one module, so it did not call for a bake-off. Governs R13, R14, R17.
 - KTD6. **One function builds the container spec, used by every run and by the startup probe.**
   - Hardening: `cap_drop=["ALL"]`, `security_opt=["no-new-privileges"]` with Podman's default seccomp, `read_only=True` and `init=True`.
@@ -136,30 +139,28 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
 
     These are the flags of Anthropic's hardened example. If the first proof that runs `Glob` or `Grep` (`dir-summary`'s, in U6) shows the bundled CLI needs an executable temp directory, the fallback is a third tmpfs, `/home/agent-exec` (`rw,nosuid,nodev,size=200m`, no `noexec`), with `CLAUDE_CODE_TMPDIR` pointing at it.
   - Limits: `AGENT_MEMORY` with swap equal to it, `AGENT_NANO_CPUS` and `AGENT_PIDS_LIMIT`.
-  - Mounts:
-    - the run directory, read-write at `/corvo/run`;
-    - the working directory at `/workspace`, read-only unless `WRITES_WORKDIR`, when the run has one.
+  - Mounts: the working directory at `/workspace`, read-only unless `WRITES_WORKDIR`, when the run has one, and nothing else. The request and the envelope travel over the attach stream (KTD4), so no run directory is mounted (agent-request-stdin plan, KTD6).
 
     A run without a working directory gets no `/workspace` mount, and its session runs in the image's empty `/workspace`.
+  - Streams: stdin is open without a tty, and the log driver is `none`, so no envelope is copied into the host's journal (agent-request-stdin plan, KTD6).
   - Naming: the container is named `corvo-agent-<task_run_id>-<retry_count>`, and its labels are `corvo.managed=true`, `corvo.deployment`, `corvo.run_id` (the workflow run), `corvo.task_run_id`, `corvo.attempt` and `corvo.agent`.
   - Network: the compat API's default.
   - Environment: KTD3's isolation variables, plus exactly one credential variable when the spec is given a credential. The probe is given none.
 
   Governs R13, R15, R16.
-- KTD7. **One setting, `CORVO_AGENT_ROOT`, holds both the working directories and the run directories, at the same absolute path for the worker and for Podman.**
+- KTD7. **One setting, `CORVO_AGENT_ROOT`, holds the working directories, at the same absolute path for the worker and for Podman.**
   - **Working directories.** They must resolve, symlinks included, to an existing directory strictly below `<root>/workdirs/`. `<root>/workdirs` itself is refused, since it would expose every other working directory.
-  - **Run directories.** The container piece creates `<root>/runs/<task_run_id>-<retry_count>/` exclusively, failing if it exists. Its mode is 0770, with the setgid group inherited. The group is the dedicated user's primary group, `corvo-agents`, the only group its container process keeps.
-  - **Writing and removing the run directory.** `request.json` is written exclusively and without following links. Removing the directory after the run never follows a symlink.
+  - **No run directories.** The request and the envelope travel over the attach stream (KTD4), so no run directory exists for any agent. The worker writes nothing under the root for a run, and the root holds only the working directories (agent-request-stdin plan, KTD6).
   - **Output from an agent that writes.** A working directory an agent may have written is untrusted output (R15). The container piece's header and `docs/agents.md` state the rule: the worker runs no git, hooks, config or code from such a tree.
   - **The same-path rule.** Podman resolves bind sources on the host, so the compose worker mounts the root at its host path, the same rule Testcontainers states. The integration worker runs on the host, so its paths agree by construction.
 
   Governs R5, R13, R15.
 - KTD8. **The task guards against the engine's re-runs, and cleans up by label, shielded and time-bounded.**
-  - **The re-run guard.** Before any session starts, a run whose `ctx.retry_count` is above zero force-removes every container labelled with its `corvo.task_run_id`. It also removes the run directories `<root>/runs/<task_run_id>-<n>/` of earlier attempts, using KTD7's removal that never follows a symlink.
-    - When it found such a container or directory, the earlier attempt never cleaned up, so its worker was lost (Dependencies). The run then fails with a message naming the re-assignment.
-    - When it found neither, the earlier attempt ended cleanly and this is a replay someone asked for: a dashboard or API replay also increments `retry_count` (engine v0.110.5 `tasks-overwrite.go`). The run proceeds.
+  - **The re-run guard.** Before any session starts, a run whose `ctx.retry_count` is above zero force-removes every container labelled with its `corvo.task_run_id`.
+    - When it found such a container, the earlier attempt never cleaned up, so its worker was lost (Dependencies). The run then fails with a message naming the re-assignment. The sweep removes only containers of ended runs (KTD11), and a re-queued run has not ended, so an earlier attempt's container is still there (agent-request-stdin plan, KTD6).
+    - When it found none, the earlier attempt ended cleanly and this is a replay someone asked for: a dashboard or API replay also increments `retry_count` (engine v0.110.5 `tasks-overwrite.go`). The run proceeds. Only a worker lost before it created its container goes unflagged, and no session ran then.
   - **Cleanup.** On exit, error, timeout or cancel, the piece force-removes containers by the `corvo.task_run_id` label, one `remove(force=True)` call each, never by the handle `create` returned. A cancel can land while the create thread is still running and leave a container with no handle. Force-remove works on running and exited containers alike, whereas a kill of an exited container answers 409.
-    - Cleanup first waits for an in-flight create or start thread.
+    - Cleanup first closes the attach socket, then waits for an in-flight create, attach or start thread (agent-request-stdin plan, KTD2).
     - It runs inside a shielded scope bounded to 30 seconds.
     - It treats 404 ("no such container") and 409 ("removal already in progress") as done.
 
@@ -184,7 +185,7 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
   Governs R7, R9, R15.
 - KTD10. **Before the worker starts serving, `main()` prepares agents in at most 45 seconds, and a failure only disables them.** When agents are configured (KTD12), it runs, in order:
   1. Check that the image is present.
-  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec, with no credential, no working directory and a scratch run directory. It writes a report into that directory:
+  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec and attached as a run is, with no credential, no working directory and no request. It frames a report on its stdout, which the worker reads from the attach stream as it reads an envelope (KTD4; agent-request-stdin plan, KTD6):
      - the fingerprint;
      - `memory.max`, `cpu.max` and `pids.max` read inside the container;
      - the effective capabilities;
@@ -223,7 +224,7 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
 
   Governs R12, R14.
 - KTD15. **The integration suite runs its own rootless Podman as the test user.**
-  - **Podman.** A session fixture starts `podman system service --time=0` on a socket inside a fixture-made agent root (`tempfile.mkdtemp`, outside pytest's temporary directories, with KTD7's modes). It builds the agent image and the test image there.
+  - **Podman.** A session fixture starts `podman system service --time=0` on a socket inside a fixture-made agent root (`tempfile.mkdtemp`, outside pytest's temporary directories). It builds the agent image and the test image there.
   - **Worker.** The worker fixture passes `CORVO_AGENT_*` pointing at it, but only when Podman is present. Without Podman, the agent tests skip locally and fail when `CI` is set, and the other integration tests keep their worker.
   - **CI fallback.** When the runner has no systemd user session, the fixture's CI-only branch runs `sudo loginctl enable-linger` and sets `XDG_RUNTIME_DIR`. U1 decides whether that branch is needed.
   - **Timeout path.** AE4 is driven by `hatchet.runs.aio_cancel`, the same engine action a timeout sends (Dependencies), because a 15-minute timeout does not fit the 20-minute CI job.
@@ -244,7 +245,7 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
     - installing Podman;
     - the dedicated user, with subordinate IDs and lingering, kept out of the `docker` group and sudoers. Its login configuration, its systemd-user configuration and its `containers` configuration (`~/.config/containers`, including `containers.conf`, `storage.conf` and `registries.conf`) are root-owned and not writable by it. It writes only its container storage;
     - a `podman.socket` drop-in that moves `ListenStream=` to `/run/corvo-agents/podman.sock` with `SocketGroup=corvo-agents` and `SocketMode=0660`, plus the `tmpfiles.d` entry for its directory;
-    - the agent root, setgid with a default ACL for the group. In production it sits on its own filesystem or quota, mounted `nodev,nosuid`;
+    - the agent root, setgid with a default ACL for the group, for the working directories under `<root>/workdirs`. It holds no run directories (agent-request-stdin plan, KTD6). In production it sits on its own filesystem or quota, mounted `nodev,nosuid`;
     - building the agent image as that user on every deploy, and recording its image ID. KTD10 refuses stale images, and a changed ID between deploys is then visible;
     - KTD16's nftables rule;
     - the credential terms and the OAuth token's one-year expiry.
@@ -252,7 +253,7 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
     - cost, turns and session ID;
     - peak process count;
     - that `/tmp` with `noexec` did not break the CLI;
-    - that the worker read the envelope across the root/rootless boundary;
+    - that the worker read the envelope from the attach stream across the root/rootless boundary;
     - the agent root's mount flags and the worker's dropped capabilities;
     - what the container could reach.
 
@@ -296,23 +297,23 @@ This is the piece every agent task uses, and the part where isolation, cleanup a
   - The `tone` task declares `retries == 0`, `AGENT_EXECUTION_TIMEOUT`, `AGENT_SCHEDULE_TIMEOUT` and the `corvo-agents` concurrency, read from its public definition.
   - `AGENT_WAITING_EXECUTION_TIMEOUT` is at least `AGENT_SCHEDULE_TIMEOUT + AGENT_EXECUTION_TIMEOUT + DETECTION_LAG`.
   - The spec drops every capability, and sets no-new-privileges, a read-only root, both tmpfs mounts with `noexec,nosuid,nodev` and their sizes, and the three limits. It carries all six labels.
-  - The spec mounts the run directory read-write and the working directory read-only, or read-write when `WRITES_WORKDIR` is true.
+  - The spec mounts the working directory read-only, or read-write when `WRITES_WORKDIR` is true, and nothing else. It opens stdin without a tty and sets the log driver to `none` (agent-request-stdin plan, KTD6).
   - With no working directory, the spec mounts no `/workspace`. With no credential, as the probe's spec, it carries no credential variable.
   - The spec passes `ANTHROPIC_API_KEY` for `api_key` and `CLAUDE_CODE_OAUTH_TOKEN` for `oauth_token`, never both, and every isolation variable of KTD3.
-  - The working-directory check accepts a directory strictly below `<root>/workdirs`. It rejects `<root>/workdirs` itself, one outside the root, one reached through a symlink that points outside, `<root>/workdirs/../runs`, and a missing path.
+  - The working-directory check accepts a directory strictly below `<root>/workdirs`. It rejects `<root>/workdirs` itself, one outside the root, one reached through a symlink that points outside, `<root>/workdirs/../other`, and a missing path.
   - The request's budget is `AGENT_EXECUTION_TIMEOUT - AGENT_DEADLINE_MARGIN` minus the time since the task started, so it is always below Hatchet's timeout.
-  - Creating a run directory that already exists fails the run before any container call.
+  - A request over the 1 MiB cap fails the run before any container call, and a container that never reads its request fails the run within `REQUEST_WRITE_TIMEOUT` (agent-request-stdin plan, KTD3).
   - The sweep decision removes `COMPLETED`, `FAILED` and `CANCELLED` entries, and keeps `QUEUED`, `RUNNING`, not-found and timed-out entries, logging a warning for the last two.
   - The probe's container is gone after preparation, whether the probe passed or failed.
   - The probe comparison rejects a `memory.max` of `max`, a fingerprint that differs and a non-empty capability set.
   - A report with a reachable metadata address disables agents when `agent_require_egress_block` is set, and only logs a warning when it is not.
-  - With the docker client replaced, a run reads an `ok` envelope and returns the output. It logs cost, turns and session ID from the envelope, then force-removes the already-exited container by label and deletes the run directory.
+  - With the docker client replaced, a run reads an `ok` envelope and returns the output. It logs cost, turns and session ID from the envelope, then closes the attach socket and force-removes the already-exited container by label.
   - Cleanup treats a 404 or a 409 from the force-remove as done.
   - Forwarded stderr lines reach `ctx.log` behind the `agent stderr:` prefix, cut to 500 characters, and stop after 900 lines.
-  - A `result.json` that is a symlink, a FIFO, a directory, larger than 1 MiB, or invalid JSON fails the task without blocking and without its content in the log.
+  - Stdout past the 1 MiB cap, a bad frame header or invalid JSON fails the task as "invalid envelope", and a missing or truncated frame as "no envelope". The stream is drained to its end without blocking, and nothing the container sent on stdout reaches the log (agent-request-stdin plan, KTD6).
   - An exit with the OOM flag and no envelope fails, logging `cost=unknown`, the exit code and the flag.
-  - With `ctx.retry_count` of 1 and a container labelled with its task run ID, the task removes that container and the earlier attempt's run directory, then fails before creating one.
-  - With `ctx.retry_count` of 1, no such container and no earlier run directory, the task proceeds as a replay.
+  - With `ctx.retry_count` of 1 and a container labelled with its task run ID, the task removes that container, then fails before creating one.
+  - With `ctx.retry_count` of 1 and no such container, the task proceeds as a replay.
   - A cancel delivered while the replaced create call is still running still removes the container that call created, found by label.
   - With agents unconfigured, the task fails with "agents are not configured" and makes no client call.
   - A run that finds agents disabled fails at once with the reason preparation logged.

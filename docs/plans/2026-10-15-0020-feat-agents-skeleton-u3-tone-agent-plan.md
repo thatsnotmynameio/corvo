@@ -106,18 +106,21 @@ This is the first agent and the code that runs inside every agent container. R18
   - A test helper in `tests/agents/` asserts the isolation fields on the options an agent built. Every agent's unit test calls it, which keeps a corvo options builder out of the runtime code (R4).
 
   Governs R10, R11.
-- KTD4. **The container hands back a JSON envelope file, and the worker treats it as untrusted.**
-  - **The request.** The worker writes `request.json` into the run directory, holding the agent package, its input, and a session budget in seconds. The budget is `AGENT_EXECUTION_TIMEOUT` minus `AGENT_DEADLINE_MARGIN`, minus the time already passed since the task started. Hatchet's timer starts at assignment, so a deadline equal to the timeout would never fire before Hatchet's own.
+- KTD4. **The container hands back a JSON envelope framed on its stdout, and the worker treats it as untrusted.**
+  - **The request.** The worker writes the request to the container's stdin, holding the agent package, its input, and a session budget in seconds. The budget is `AGENT_EXECUTION_TIMEOUT` minus `AGENT_DEADLINE_MARGIN`, minus the time already passed since the task started. Hatchet's timer starts at assignment, so a deadline equal to the timeout would never fire before Hatchet's own.
+    - The request is framed by its length: an ASCII decimal length, a newline, then exactly that many bytes, at most 1 MiB. `corvo.agents.frame` holds the rule for both sides (agent-request-stdin plan, KTD1).
+    - The worker attaches to the created container before it starts, and writes the frame within `REQUEST_WRITE_TIMEOUT` (45 s). A container that never reads fails the run within that bound (agent-request-stdin plan, KTD2, KTD3).
+    - The runner reads the frame within `REQUEST_READ_TIMEOUT` (30 s), then points fd 0 at `/dev/null`. A request that does not arrive whole fails as `invalid_request` (agent-request-stdin plan, KTD4).
   - **Running the session.** The runner runs `run` under `asyncio.timeout` to that budget. Inside `run`, `corvo.agents.session.consume` keeps the last `ResultMessage` and catches `ResultError` and `ProcessError`. It prints the session ID to stderr when the init message arrives. The run succeeds only when the result is not an error, its subtype is `success`, and its `structured_output` validates.
-  - **The envelope.** The runner writes `result.json` atomically, to a temporary name and then a rename, holding:
+  - **The envelope.** The runner frames the envelope on a private copy of its stdout, and points fd 1 at stderr, so nothing else printed reaches the frame (agent-request-stdin plan, KTD6). It holds:
     - a protocol version;
     - `ok` or `failed`, with the output or the reason (`deadline` when the budget ran out);
     - the run report: subtype, turns, cost and session ID.
-  - **Reading the envelope.** After the container exits, the worker opens `result.json` non-blocking and without following symlinks, and checks with `fstat` that it is a regular file of at most 1 MiB before any read. A FIFO, a device or a directory named `result.json` can therefore never block a worker thread. The worker never echoes the file's content, and validates it with the envelope model. The probe's report (KTD10) is read the same way.
+  - **Reading the envelope.** The worker reads the attach stream. Stdout is kept up to one frame at the 1 MiB cap and drained past it, so the container never blocks. Reading continues until the stream ends, at most `DRAIN_TIMEOUT` (5 s) after the container exits (agent-request-stdin plan, KTD6). A missing or truncated frame is "no envelope". A bad header, an oversized frame or invalid JSON is "invalid envelope". The worker never echoes what it read, and validates it with the envelope model. The probe's report (KTD10) is read the same way.
   - **Failures.** A failed envelope, a missing or invalid one, or an out-of-memory kill fails the task. The worker logs the cost, turns and session ID from the validated envelope only. When no envelope exists, it logs them as `unknown`, with the exit code and the OOM flag.
-  - **Forwarding stderr.** The worker sends stderr lines to `ctx.log` behind a fixed `agent stderr:` prefix, so a line the agent prints can never pass for one of the worker's own. Each line is cut to 500 characters with control characters stripped, up to 900 lines (Hatchet keeps 1000).
+  - **Forwarding stderr.** The worker sends the stderr lines of the attach stream to `ctx.log` behind a fixed `agent stderr:` prefix, so a line the agent prints can never pass for one of the worker's own. Each line is cut to 500 characters with control characters stripped, up to 900 lines (Hatchet keeps 1000).
 
-  A file beats stdout because conmon can split long lines and Hatchet caps log lines. claude-code-action hands its results over through a file too. Governs R8, R13, R15.
+  The attach stream's stdout reaches the worker raw and never reaches Hatchet's log, and the runner's private stdout keeps anything else printed out of the frame (agent-request-stdin plan, KTD6). Governs R8, R13, R15.
 - KTD6. **One function builds the container spec, used by every run and by the startup probe.**
   - Hardening: `cap_drop=["ALL"]`, `security_opt=["no-new-privileges"]` with Podman's default seccomp, `read_only=True` and `init=True`.
   - tmpfs through docker-py's `tmpfs=` mapping (a tmpfs `Mount` gets mode 0 on Podman):
@@ -126,11 +129,10 @@ This is the first agent and the code that runs inside every agent container. R18
 
     These are the flags of Anthropic's hardened example. If the first proof that runs `Glob` or `Grep` (`dir-summary`'s, in U6) shows the bundled CLI needs an executable temp directory, the fallback is a third tmpfs, `/home/agent-exec` (`rw,nosuid,nodev,size=200m`, no `noexec`), with `CLAUDE_CODE_TMPDIR` pointing at it.
   - Limits: `AGENT_MEMORY` with swap equal to it, `AGENT_NANO_CPUS` and `AGENT_PIDS_LIMIT`.
-  - Mounts:
-    - the run directory, read-write at `/corvo/run`;
-    - the working directory at `/workspace`, read-only unless `WRITES_WORKDIR`, when the run has one.
+  - Mounts: the working directory at `/workspace`, read-only unless `WRITES_WORKDIR`, when the run has one, and nothing else. The request and the envelope travel over the attach stream (KTD4), so no run directory is mounted (agent-request-stdin plan, KTD6).
 
     A run without a working directory gets no `/workspace` mount, and its session runs in the image's empty `/workspace`.
+  - Streams: stdin is open without a tty, and the log driver is `none`, so no envelope is copied into the host's journal (agent-request-stdin plan, KTD6).
   - Naming: the container is named `corvo-agent-<task_run_id>-<retry_count>`, and its labels are `corvo.managed=true`, `corvo.deployment`, `corvo.run_id` (the workflow run), `corvo.task_run_id`, `corvo.attempt` and `corvo.agent`.
   - Network: the compat API's default.
   - Environment: KTD3's isolation variables, plus exactly one credential variable when the spec is given a credential. The probe is given none.
@@ -138,7 +140,7 @@ This is the first agent and the code that runs inside every agent container. R18
   Governs R13, R15, R16.
 - KTD10. **Before the worker starts serving, `main()` prepares agents in at most 45 seconds, and a failure only disables them.** When agents are configured (KTD12), it runs, in order:
   1. Check that the image is present.
-  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec, with no credential, no working directory and a scratch run directory. It writes a report into that directory:
+  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec and attached as a run is, with no credential, no working directory and no request. It frames a report on its stdout, which the worker reads from the attach stream as it reads an envelope (KTD4; agent-request-stdin plan, KTD6):
      - the fingerprint;
      - `memory.max`, `cpu.max` and `pids.max` read inside the container;
      - the effective capabilities;
@@ -240,9 +242,9 @@ This is the first agent and the code that runs inside every agent container. R18
   - The runner, with the agent's `run` replaced by one returning an output and a `RunReport`, writes an `ok` envelope with both.
   - With `run` raising `AgentRunFailed`, the runner writes a `failed` envelope with the reason and the report.
   - When the budget runs out, the runner writes a `failed` envelope naming `deadline`.
-  - Each envelope is written by a rename, so no partial file is ever seen.
+  - Each envelope is framed on the runner's private stdout, and anything else printed to fd 1 goes to stderr, not into the frame (agent-request-stdin plan, KTD6).
   - The runner rejects a request naming a package that does not exist under `corvo.agents`, with a `failed` envelope.
-  - `corvo-agent probe` writes a report with the fingerprint and the cgroup values it read, from a fake `/sys` root passed in the test.
+  - `corvo-agent probe` frames a report on its stdout with the fingerprint and the cgroup values it read, from a fake `/sys` root passed in the test.
   - Two fingerprints over the same files are equal, and changing one byte of a prompt changes it.
   - A stray `__pycache__/x.pyc` under `corvo/agents/` leaves the fingerprint unchanged.
   - The fake CLI run through the real SDK via `cli_path` returns a `ResultMessage` with the canned structured output within the timeout, and with `fake:max-turns`, an error result and `ResultError`.

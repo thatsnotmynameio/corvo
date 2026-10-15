@@ -70,7 +70,7 @@ The skeleton is only usable once a host can be provisioned for it. R14's shared-
 
 - KTD10. **Before the worker starts serving, `main()` prepares agents in at most 45 seconds, and a failure only disables them.** When agents are configured (KTD12), it runs, in order:
   1. Check that the image is present.
-  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec, with no credential, no working directory and a scratch run directory. It writes a report into that directory:
+  2. Run the probe: `corvo-agent probe` in a container built by KTD6's spec and attached as a run is, with no credential, no working directory and no request. It frames a report on its stdout, which the worker reads from the attach stream as it reads an envelope (KTD4; agent-request-stdin plan, KTD6):
      - the fingerprint;
      - `memory.max`, `cpu.max` and `pids.max` read inside the container;
      - the effective capabilities;
@@ -121,7 +121,7 @@ The skeleton is only usable once a host can be provisioned for it. R14's shared-
     - installing Podman;
     - the dedicated user, with subordinate IDs and lingering, kept out of the `docker` group and sudoers. Its login configuration, its systemd-user configuration and its `containers` configuration (`~/.config/containers`, including `containers.conf`, `storage.conf` and `registries.conf`) are root-owned and not writable by it. It writes only its container storage;
     - a `podman.socket` drop-in that moves `ListenStream=` to `/run/corvo-agents/podman.sock` with `SocketGroup=corvo-agents` and `SocketMode=0660`, plus the `tmpfiles.d` entry for its directory;
-    - the agent root, setgid with a default ACL for the group. In production it sits on its own filesystem or quota, mounted `nodev,nosuid`;
+    - the agent root, setgid with a default ACL for the group, for the working directories under `<root>/workdirs`. It holds no run directories (agent-request-stdin plan, KTD6). In production it sits on its own filesystem or quota, mounted `nodev,nosuid`;
     - building the agent image as that user on every deploy, and recording its image ID. KTD10 refuses stale images, and a changed ID between deploys is then visible;
     - KTD16's nftables rule;
     - the credential terms and the OAuth token's one-year expiry.
@@ -129,7 +129,7 @@ The skeleton is only usable once a host can be provisioned for it. R14's shared-
     - cost, turns and session ID;
     - peak process count;
     - that `/tmp` with `noexec` did not break the CLI;
-    - that the worker read the envelope across the root/rootless boundary;
+    - that the worker read the envelope from the attach stream across the root/rootless boundary;
     - the agent root's mount flags and the worker's dropped capabilities;
     - what the container could reach.
 
