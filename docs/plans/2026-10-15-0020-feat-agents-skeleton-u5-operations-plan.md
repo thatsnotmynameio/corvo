@@ -120,7 +120,7 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 
   Governs R12, R13, R16, R25, R27.
 - KTD22. **Caddy 2.11.7 holds the Claude credential, as the `claude-proxy` service.**
-  - It runs from the official `caddy:2.11.7-alpine` image with `deploy/claude-proxy/Caddyfile`, and its admin API is off.
+  - It runs from the official `caddy:2.11.7-alpine` image with `src/corvo/agents/Caddyfile`, and its admin API is off.
   - It accepts only `POST /v1/messages` and `POST /v1/messages/count_tokens`, with their query, and answers 404 to anything else, `HEAD /api/hello` included.
   - It removes the incoming `x-api-key` and `Authorization`, and sets `CORVO_AGENT_CREDENTIAL` in the header `CORVO_AGENT_CREDENTIAL_KIND` names: `x-api-key`, or `Authorization: Bearer`. Every `anthropic-*` header and the body pass unchanged, including the OAuth beta value without which the API answers 401.
   - It refuses an `anthropic-beta` value naming `mcp-client` or `web-fetch`, which would let a request make the API itself fetch from an address the request names, and it caps the request body at 32 MiB. Web search needs no beta header, so `docs/agents.md` requires web search and web fetch turned off in the API key's Console organization. It also states that an `oauth_token` deployment cannot turn them off.
@@ -132,10 +132,10 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 
   Governs R12, R16.
 - KTD23. **The agent worker's seccomp profile is generated from Docker's, vendored at a pinned tag, and checked in CI.**
-  - `deploy/agent-worker/seccomp-moby-default.json` is moby's `vendor/github.com/moby/profiles/seccomp/default.json` at `docker-v29.7.2`. `deploy/agent-worker/seccomp.py` adds `clone`, `unshare`, `mount`, `umount2`, `pivot_root` and `setns` to its allow rule, and writes `deploy/agent-worker/seccomp.json`.
-  - It also denies `socket(AF_NETLINK, …, NETLINK_NETFILTER)`. Allowing user namespaces opens nf_tables to every command, the kernel area most unprivileged-namespace exploits have used, such as CVE-2024-1086. bubblewrap needs only `NETLINK_ROUTE`, and U1 confirms the SDK's sandbox needs nothing more. This is narrower than R27's floor, never wider.
-  - `tests/test_seccomp_profile.py` regenerates the profile in memory and fails on any difference from the committed one. It also fails when `keyctl`, `add_key`, `request_key`, `perf_event_open`, `kexec_load` or `open_by_handle_at` become allowed, or when the netfilter rule is gone.
-  - Compose sets `seccomp=deploy/agent-worker/seccomp.json`, `systempaths=unconfined` and `writable-cgroups=true` on `agent-worker` only. Refreshing the vendored copy when the host's Docker moves to a new major is a step in `docs/agents.md`.
+  - `src/corvo/worker/agent_runtime/seccomp-moby-default.json` is moby's `vendor/github.com/moby/profiles/seccomp/default.json` at `docker-v29.7.2`, with its Apache-2.0 license beside it in `seccomp-moby-default.LICENSE`. `corvo.worker.agent_runtime.seccomp` adds `clone`, `unshare`, `mount`, `umount2`, `pivot_root` and `setns` to its allow rule, and writes `seccomp.json` beside it.
+  - It also denies `socket(AF_NETLINK, …, NETLINK_NETFILTER)`, and takes `socketcall` off the allow rule: 32-bit x86 would open the same socket through it, with arguments no filter reads. Allowing user namespaces opens nf_tables to every command, the kernel area most unprivileged-namespace exploits have used, such as CVE-2024-1086. bubblewrap needs only `NETLINK_ROUTE`, and U1 confirms the SDK's sandbox needs nothing more. This is narrower than R27's floor, never wider.
+  - `tests/worker/agent_runtime/test_seccomp.py` regenerates the profile in memory and fails on any difference from the committed one. It also fails when `keyctl`, `add_key`, `request_key`, `perf_event_open`, `kexec_load` or `open_by_handle_at` become allowed, or when the netfilter rule is gone.
+  - Compose sets `seccomp=src/corvo/worker/agent_runtime/seccomp.json`, `systempaths=unconfined` and `writable-cgroups=true` on `agent-worker` only. Refreshing the vendored copy when the host's Docker moves to a new major is a step in `docs/agents.md`.
 
   Governs R27.
 - KTD24. **The `agents` compose network is internal, and only the proxy also reaches the outside.**
@@ -181,7 +181,7 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 - **Requirements:** R12, R13, R16, R25, R27, R31; KTD18, KTD22, KTD23, KTD24, KTD25.
 - **Dependencies:** U8.
 - **Files:**
-  - Create `deploy/claude-proxy/Caddyfile`.
+  - Create `src/corvo/agents/Caddyfile`.
   - Modify `compose.yaml` (`claude-proxy`, its networks, the agent worker's proxy address) and `.env.example` (the credential and its kind).
   - Modify `tests/integration/worker/compose.yaml` (the proxy's upstream on `scripted-api`, `agent-probe` through the proxy) and `tests/integration/worker/conftest.py` (`write_env_file`'s dummy credential).
   - Create `tests/integration/worker/test_proxy.py`, and modify `tests/agents/probe/probe.sh` (the attempts on the proxy).

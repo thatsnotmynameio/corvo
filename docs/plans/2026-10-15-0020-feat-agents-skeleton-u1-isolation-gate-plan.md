@@ -94,7 +94,7 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 
   Governs R10, R11, R15.
 - KTD13. **The agent worker's image is an `agent-worker` stage of the repository's `Dockerfile`, entered as root only to delegate cgroups.**
-  - The stage builds `FROM app`. It installs Debian trixie's `bubblewrap` and `socat`, creates the user `agent` with uid 1000, and strips every setuid and setgid bit from the image. It moves the SDK's bundled engine out of the SDK's package to `/opt/corvo/engine/claude`, which `CORVO_AGENT_ENGINE` names. That path is off `PATH` and outside every place the SDK's CLI discovery looks, `/usr/local/bin/claude` and `~/.local/bin/claude` among them. An agent that forgets `cli_path` then fails with the SDK's `CLINotFoundError` instead of starting the engine outside any sandbox with the worker's environment. Its entrypoint is `deploy/agent-worker/entrypoint.sh`, and `CMD ["corvo-worker"]`; compose sets `CORVO_WORKER_PROFILE=agents` (KTD26).
+  - The stage builds `FROM app`. It installs Debian trixie's `bubblewrap` and `socat`, creates the user `agent` with uid 1000, and strips every setuid and setgid bit from the image. It moves the SDK's bundled engine out of the SDK's package to `/opt/corvo/engine/claude`, which `CORVO_AGENT_ENGINE` names. That path is off `PATH` and outside every place the SDK's CLI discovery looks, `/usr/local/bin/claude` and `~/.local/bin/claude` among them. An agent that forgets `cli_path` then fails with the SDK's `CLINotFoundError` instead of starting the engine outside any sandbox with the worker's environment. Its entrypoint is `src/corvo/worker/agent_runtime/entrypoint.sh`, and `CMD ["corvo-worker"]`; compose sets `CORVO_WORKER_PROFILE=agents` (KTD26).
   - The entrypoint runs as root and does five things:
     1. moves the container's processes into an `init` cgroup;
     2. enables `+cpu +memory +pids` for the subtree;
@@ -118,11 +118,11 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 - KTD20. **The wrapper `corvo-agent-sandbox` is the SDK's `cli_path`, and it starts the engine in a fresh bubblewrap of its own.**
   - It lives in `corvo.worker.agent_runtime.sandbox`, which imports only the standard library (KTD2): a pure function builds bubblewrap's arguments, and `main` only checks and execs.
   - It reads its run's values from variables the session piece puts in `options.env`: `CORVO_SANDBOX_CGROUP`, `CORVO_SANDBOX_WORKDIR` (empty for an agent without one), `CORVO_SANDBOX_WRITES`, `CORVO_SANDBOX_ENGINE` and `CORVO_SANDBOX_TMPFS`. A call without them exits non-zero.
-  - It refuses to start unless the `--settings` argument the SDK passes holds `sandbox.enabled`, `failIfUnavailable: true` and `allowUnsandboxedCommands: false`. An agent that left out `session.sandbox` therefore never runs.
+  - It refuses to start unless the `--settings` argument the SDK passes holds `sandbox.enabled`, `failIfUnavailable: true` and `allowUnsandboxedCommands: false`, and no `excludedCommands` or `enableWeakerNestedSandbox`. An agent that left out `session.sandbox` therefore never runs.
   - It writes its PID into the run's `cgroup.procs`, and exits non-zero if it cannot, so nothing starts outside the cgroup.
   - It then execs `bwrap` with an **empty environment**. bubblewrap's own pid 1 inside the sandbox is a fork that never execs, so the environment `bwrap` was started with stays readable at `/proc/1/environ`; `--clearenv` alone would leave the worker's Hatchet token there. Its arguments:
     - `--unshare-all --unshare-cgroup --share-net --die-with-parent --new-session --clearenv`. `--unshare-cgroup` is explicit, because `--unshare-all` only tries it;
-    - each allowed variable by `--setenv`: the placeholder's variable, `ANTHROPIC_BASE_URL`, `HOME`, `CLAUDE_CONFIG_DIR`, `PATH`, the SDK's own `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_AGENT_SDK_VERSION` and `CLAUDE_CODE_SDK_READS_SESSION_STATE`, and the isolation flags, which the wrapper sets itself whatever `options.env` held;
+    - each allowed variable by `--setenv`: the placeholder's variable, which is the credential variable holding the fixed placeholder `corvo.worker.agent_runtime.sandbox.PLACEHOLDER` (KTD12), `ANTHROPIC_BASE_URL`, `HOME`, `CLAUDE_CONFIG_DIR`, `PATH`, the SDK's own `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_AGENT_SDK_VERSION` and `CLAUDE_CODE_SDK_READS_SESSION_STATE`, and the isolation flags, which the wrapper sets itself whatever `options.env` held;
     - `/usr` and `/etc` read-only, with their symlinks; a fresh `/proc` and `/dev`, and no `/sys`; `/tmp` and the home as tmpfs of `CORVO_SANDBOX_TMPFS`;
     - the engine's directory read-only, and the working directory by descriptor (KTD7) at the same path, or `--chdir` to the home when there is none.
   - The isolation flags are `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1` and `ENABLE_CLAUDEAI_MCP_SERVERS=false`. `HOME` and `CLAUDE_CONFIG_DIR` point into the tmpfs home.
@@ -138,10 +138,10 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 
   Governs R17, R26.
 - KTD23. **The agent worker's seccomp profile is generated from Docker's, vendored at a pinned tag, and checked in CI.**
-  - `deploy/agent-worker/seccomp-moby-default.json` is moby's `vendor/github.com/moby/profiles/seccomp/default.json` at `docker-v29.7.2`. `deploy/agent-worker/seccomp.py` adds `clone`, `unshare`, `mount`, `umount2`, `pivot_root` and `setns` to its allow rule, and writes `deploy/agent-worker/seccomp.json`.
-  - It also denies `socket(AF_NETLINK, …, NETLINK_NETFILTER)`. Allowing user namespaces opens nf_tables to every command, the kernel area most unprivileged-namespace exploits have used, such as CVE-2024-1086. bubblewrap needs only `NETLINK_ROUTE`, and U1 confirms the SDK's sandbox needs nothing more. This is narrower than R27's floor, never wider.
-  - `tests/test_seccomp_profile.py` regenerates the profile in memory and fails on any difference from the committed one. It also fails when `keyctl`, `add_key`, `request_key`, `perf_event_open`, `kexec_load` or `open_by_handle_at` become allowed, or when the netfilter rule is gone.
-  - Compose sets `seccomp=deploy/agent-worker/seccomp.json`, `systempaths=unconfined` and `writable-cgroups=true` on `agent-worker` only. Refreshing the vendored copy when the host's Docker moves to a new major is a step in `docs/agents.md`.
+  - `src/corvo/worker/agent_runtime/seccomp-moby-default.json` is moby's `vendor/github.com/moby/profiles/seccomp/default.json` at `docker-v29.7.2`, with its Apache-2.0 license beside it in `seccomp-moby-default.LICENSE`. `corvo.worker.agent_runtime.seccomp` adds `clone`, `unshare`, `mount`, `umount2`, `pivot_root` and `setns` to its allow rule, and writes `seccomp.json` beside it.
+  - It also denies `socket(AF_NETLINK, …, NETLINK_NETFILTER)`, and takes `socketcall` off the allow rule: 32-bit x86 would open the same socket through it, with arguments no filter reads. Allowing user namespaces opens nf_tables to every command, the kernel area most unprivileged-namespace exploits have used, such as CVE-2024-1086. bubblewrap needs only `NETLINK_ROUTE`, and U1 confirms the SDK's sandbox needs nothing more. This is narrower than R27's floor, never wider.
+  - `tests/worker/agent_runtime/test_seccomp.py` regenerates the profile in memory and fails on any difference from the committed one. It also fails when `keyctl`, `add_key`, `request_key`, `perf_event_open`, `kexec_load` or `open_by_handle_at` become allowed, or when the netfilter rule is gone.
+  - Compose sets `seccomp=src/corvo/worker/agent_runtime/seccomp.json`, `systempaths=unconfined` and `writable-cgroups=true` on `agent-worker` only. Refreshing the vendored copy when the host's Docker moves to a new major is a step in `docs/agents.md`.
 
   Governs R27.
 - KTD24. **The `agents` compose network is internal, and only the proxy also reaches the outside.**
@@ -175,10 +175,11 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 - **Files:**
   - Modify `pyproject.toml` and `uv.lock`: `claude-agent-sdk==0.2.167`, the Linux-only `[tool.uv] environments` block without its Podman wording, and the `corvo-agent-sandbox` script.
   - Modify `Dockerfile` (`agent-worker` stage).
-  - Create `deploy/agent-worker/entrypoint.sh`, `deploy/agent-worker/seccomp.py`, `deploy/agent-worker/seccomp-moby-default.json` and `deploy/agent-worker/seccomp.json`.
+  - Create, in `src/corvo/worker/agent_runtime/`, `entrypoint.sh`, `seccomp.py`, `seccomp.json`, `seccomp-moby-default.json` and `seccomp-moby-default.LICENSE`.
   - Create `src/corvo/worker/agent_runtime/__init__.py` and `src/corvo/worker/agent_runtime/sandbox.py`.
-  - Create `tests/test_seccomp_profile.py`, `tests/worker/agent_runtime/__init__.py` and `tests/worker/agent_runtime/test_sandbox.py`.
+  - Create `tests/worker/agent_runtime/__init__.py`, `test_sandbox.py` and `test_seccomp.py`.
   - Create `tests/agents/__init__.py`, `tests/agents/scripted_api.py`, `tests/integration/worker/test_isolation_gate.py` and the gate's driver under `tests/integration/worker/gate/`.
+  - Modify `.github/python.yml`: a Trunk collection `corvo-agents` for `tests/agents`, which this unit creates, and its `--ignore` in the last collection, since the file keeps one collection per directory of `tests/`. The collection is made in Trunk first, for its ID. The file applies from a pull request's base, so U2, the first unit with tests there, picks it up.
 - **Approach:**
   1. The `agent-worker` stage and its entrypoint per KTD13, with the closing `FROM app` kept.
   2. The profile generator and its diff test per KTD23.
@@ -210,7 +211,7 @@ Copied from the parent; a KTD cited here but not copied is in the parent.
 ## Verification Contract
 
 - `uv run prek run --all-files`: ruff, format, mypy strict, lockfile, zizmor, actionlint.
-- `uv run pytest tests/test_seccomp_profile.py tests/worker/agent_runtime`: the profile's diff and the wrapper's arguments, no Docker.
+- `uv run pytest tests/worker/agent_runtime`: the profile's diff and the wrapper's arguments, no Docker.
 - `uv run pytest tests/integration/worker/test_isolation_gate.py`: the gate, which needs Docker.
 - `docker build --target agent-worker .`, and `docker build .` still runs uvicorn by default.
 - CI: `tnmn.io: python` on the pull request.
