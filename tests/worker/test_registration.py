@@ -1,18 +1,19 @@
-"""The worker registers every task and workflow the three areas define.
+"""Each profile registers every task and workflow its areas define.
 
 Hatchet starts a worker without complaint when a definition is missing from
-its list, and lets a duplicate name win silently. This test checks WORKFLOWS
-against every module-level definition in corvo.worker.tasks,
-corvo.worker.workflows and corvo.worker.agents, and names each one that is
-unregistered, listed twice or sharing a name. It also fails on what would
-hide a definition from it: a directory without __init__.py, or a module that
-fails to import.
+its list, and lets a duplicate name win silently. This test maps each area
+to its profile, corvo.worker.tasks and corvo.worker.workflows to main and
+corvo.worker.agents to agents, and checks each profile's list against every
+module-level definition in its areas. It names each one that is on no
+worker, on a profile other than its area's, listed twice or sharing a name
+with another on any profile. It also fails on what would hide a definition
+from it: a directory without __init__.py, or a module that fails to import.
 """
 
 import importlib
 import pkgutil
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -26,9 +27,13 @@ import corvo.worker.tasks
 import corvo.worker.workflows
 from corvo.settings import get_settings
 from corvo.worker.hatchet_client import hatchet
-from corvo.worker.worker import WORKFLOWS
+from corvo.worker.profiles import PROFILES
 
-AREAS = [corvo.worker.tasks, corvo.worker.workflows, corvo.worker.agents]
+# Each profile's areas: an agent task belongs on the agent worker alone.
+AREAS = {
+    "main": [corvo.worker.tasks, corvo.worker.workflows],
+    "agents": [corvo.worker.agents],
+}
 
 type Definition = tuple[str, BaseWorkflow[Any]]
 
@@ -69,33 +74,60 @@ def definitions(modules: Iterable[ModuleType]) -> list[Definition]:
 
 
 def problems(
-    defined: Sequence[Definition], registered: list[BaseWorkflow[Any]]
+    defined: Mapping[str, Sequence[Definition]],
+    registered: Mapping[str, list[BaseWorkflow[Any]]],
 ) -> list[str]:
-    labels = {id(workflow): label for label, workflow in defined}
-    every = {id(workflow): workflow for _, workflow in defined}
-    every |= {id(workflow): workflow for workflow in registered}
+    """Each profile's definitions checked against each profile's list."""
+    labels = {
+        id(workflow): label for found in defined.values() for label, workflow in found
+    }
+    home = {
+        id(workflow): profile
+        for profile, found in defined.items()
+        for _, workflow in found
+    }
+    every = {
+        id(workflow): workflow for found in defined.values() for _, workflow in found
+    }
+    every |= {
+        id(workflow): workflow
+        for workflows in registered.values()
+        for workflow in workflows
+    }
 
-    def label(workflow: BaseWorkflow[Any]) -> str:
-        return labels.get(id(workflow), workflow.name)
+    def label(key: int) -> str:
+        workflow = every[key]
+        return f"{labels.get(key, workflow.name)} ({workflow.name})"
 
-    listed = Counter(id(workflow) for workflow in registered)
+    listed = {
+        profile: Counter(id(workflow) for workflow in workflows)
+        for profile, workflows in sorted(registered.items())
+    }
     # Hatchet keys a worker's actions on service_name, the name lowercased
-    # with the namespace applied, and the last one registered wins.
+    # with the namespace applied, and the last one registered wins. Two
+    # profiles' tasks sharing one would share their runs too.
     sharing: defaultdict[str, list[str]] = defaultdict(list)
-    for workflow in every.values():
-        sharing[workflow.service_name].append(label(workflow))
+    for key, workflow in every.items():
+        sharing[workflow.service_name].append(labels.get(key, workflow.name))
 
     return [
         *(
-            f"{label(workflow)} ({workflow.name}) is on no worker: add it to WORKFLOWS"
-            for workflow in every.values()
-            if not listed[id(workflow)]
+            f"{label(key)} is on no worker: add it to the {profile} profile"
+            for key, profile in home.items()
+            if not listed.get(profile, Counter())[key]
         ),
         *(
-            f"{label(workflow)} ({workflow.name}) is listed {listed[id(workflow)]} "
-            "times in WORKFLOWS"
-            for workflow in every.values()
-            if listed[id(workflow)] > 1
+            f"{label(key)} is on the {profile} profile, but its area's profile "
+            f"is {home[key]}"
+            for profile, counts in listed.items()
+            for key in counts
+            if key in home and home[key] != profile
+        ),
+        *(
+            f"{label(key)} is listed {count} times on the {profile} profile"
+            for profile, counts in listed.items()
+            for key, count in counts.items()
+            if count > 1
         ),
         *(
             f"{' and '.join(names)} share the name {name!r}"
@@ -103,6 +135,13 @@ def problems(
             if len(names) > 1
         ),
     ]
+
+
+def profile_lists() -> dict[str, list[BaseWorkflow[Any]]]:
+    return {
+        name: importlib.import_module(path).PROFILE.workflows
+        for name, path in PROFILES.items()
+    }
 
 
 def module(name: str, **attributes: object) -> ModuleType:
@@ -147,31 +186,69 @@ async def namespaced_job(input: EmptyModel, ctx: Context) -> None: ...
 async def prefixed_job(input: EmptyModel, ctx: Context) -> None: ...
 
 
-def test_every_definition_in_the_areas_is_registered() -> None:
-    roots = [Path(path) for area in AREAS for path in area.__path__]
+def test_every_definition_in_the_areas_is_on_its_profile() -> None:
+    roots = [
+        Path(path)
+        for areas in AREAS.values()
+        for area in areas
+        for path in area.__path__
+    ]
+    defined = {
+        profile: definitions(area_modules(areas)) for profile, areas in AREAS.items()
+    }
 
-    found = unpackaged(roots) + problems(definitions(area_modules(AREAS)), WORKFLOWS)
+    found = unpackaged(roots) + problems(defined, profile_lists())
 
     assert found == []
 
 
-def test_a_definition_missing_from_the_list_is_named() -> None:
+def test_every_profile_has_its_areas() -> None:
+    assert sorted(AREAS) == sorted(PROFILES)
+
+
+def test_a_definition_missing_from_its_profile_is_named() -> None:
     defined = definitions([module("area.example", example=example)])
 
-    found = problems(defined, [])
+    found = problems({"agents": defined}, {"agents": [], "main": []})
 
     assert found == [
         "area.example.example (registration-example) is on no worker: "
-        "add it to WORKFLOWS"
+        "add it to the agents profile"
     ]
 
 
-def test_two_definitions_sharing_a_name_are_both_named() -> None:
-    defined = definitions(
-        [module("area.first", dup=first_dup), module("area.second", dup=second_dup)]
-    )
+def test_a_definition_on_both_profiles_is_named() -> None:
+    defined = definitions([module("area.example", example=example)])
 
-    found = problems(defined, [first_dup, second_dup])
+    found = problems({"agents": defined}, {"agents": [example], "main": [example]})
+
+    assert found == [
+        "area.example.example (registration-example) is on the main profile, "
+        "but its area's profile is agents"
+    ]
+
+
+def test_a_definition_on_the_other_profile_alone_is_named() -> None:
+    defined = definitions([module("area.example", example=example)])
+
+    found = problems({"agents": defined}, {"agents": [], "main": [example]})
+
+    assert found == [
+        "area.example.example (registration-example) is on no worker: "
+        "add it to the agents profile",
+        "area.example.example (registration-example) is on the main profile, "
+        "but its area's profile is agents",
+    ]
+
+
+def test_two_definitions_sharing_a_name_across_profiles_are_both_named() -> None:
+    found = problems(
+        {
+            "main": definitions([module("area.first", dup=first_dup)]),
+            "agents": definitions([module("area.second", dup=second_dup)]),
+        },
+        {"main": [first_dup], "agents": [second_dup]},
+    )
 
     assert found == ["area.first.dup and area.second.dup share the name 'dup'"]
 
@@ -181,7 +258,7 @@ def test_names_differing_only_in_case_are_shared() -> None:
         [module("area.first", dup=first_dup), module("area.second", dup=capital_dup)]
     )
 
-    found = problems(defined, [first_dup, capital_dup])
+    found = problems({"main": defined}, {"main": [first_dup, capital_dup]})
 
     assert found == ["area.first.dup and area.second.dup share the name 'dup'"]
 
@@ -195,7 +272,7 @@ def test_names_sharing_a_namespaced_name_are_shared() -> None:
         ]
     )
 
-    found = problems(defined, [namespaced_job, prefixed_job])
+    found = problems({"main": defined}, {"main": [namespaced_job, prefixed_job]})
 
     assert found == ["area.first.job and area.second.job share the name 'foo_job'"]
 
@@ -203,10 +280,11 @@ def test_names_sharing_a_namespaced_name_are_shared() -> None:
 def test_a_definition_listed_twice_is_named() -> None:
     defined = definitions([module("area.example", example=example)])
 
-    found = problems(defined, [example, example])
+    found = problems({"main": defined}, {"main": [example, example]})
 
     assert found == [
-        "area.example.example (registration-example) is listed 2 times in WORKFLOWS"
+        "area.example.example (registration-example) is listed 2 times on the "
+        "main profile"
     ]
 
 

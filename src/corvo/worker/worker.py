@@ -1,27 +1,49 @@
-from typing import Any
+import importlib
+import logging
+import signal
+import sys
+from collections.abc import Callable
+from types import FrameType
 
-from hatchet_sdk import Worker
-from hatchet_sdk.runnables.workflow import BaseWorkflow
-
+from corvo.settings import get_settings
 from corvo.worker.hatchet_client import hatchet
-from corvo.worker.tasks.hello import hello
-from corvo.worker.workflows.greeting import greeting
-from corvo.worker.workflows.greeting_rounds import greeting_rounds
+from corvo.worker.profiles import PROFILES, Profile
 
-# Every task and workflow corvo-worker serves, one line each.
-# tests/worker/test_registration.py fails, naming the definition, when one in
-# corvo.worker.tasks, corvo.worker.workflows or corvo.worker.agents is missing
-# here.
-WORKFLOWS: list[BaseWorkflow[Any]] = [
-    hello,
-    greeting,
-    greeting_rounds,
-]
+logger = logging.getLogger(__name__)
 
 
-def create_worker() -> Worker:
-    return hatchet.worker("corvo-worker", workflows=WORKFLOWS)
+def serve(profile: Profile) -> None:
+    if profile.before_start is not None:
+        profile.before_start()
+    worker = hatchet.worker(
+        profile.name, slots=profile.slots, workflows=profile.workflows
+    )
+    if profile.on_sigterm is not None:
+        # Hatchet's Worker installed its own handler; this one runs first.
+        install_sigterm(profile.on_sigterm)
+    worker.start()
+
+
+def install_sigterm(hook: Callable[[], None]) -> None:
+    hatchet_handler = signal.getsignal(signal.SIGTERM)
+
+    def handle(signum: int, frame: FrameType | None) -> None:
+        hook()
+        if callable(hatchet_handler):
+            hatchet_handler(signum, frame)
+
+    signal.signal(signal.SIGTERM, handle)
 
 
 def main() -> None:
-    create_worker().start()
+    logging.basicConfig(level=logging.INFO)
+    name = get_settings().worker_profile
+    if name not in PROFILES:
+        logger.error(
+            "unknown worker profile %r: the profiles are %s",
+            name,
+            ", ".join(sorted(PROFILES)),
+        )
+        sys.exit(1)
+    # By name, so the main profile never imports the agents profile's tasks.
+    serve(importlib.import_module(PROFILES[name]).PROFILE)
