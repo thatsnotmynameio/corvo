@@ -47,4 +47,4 @@ def assert_isolated(options: ClaudeAgentOptions, session: Session) -> None:
     assert sandbox["allowUnsandboxedCommands"] is False
     assert not sandbox.get("excludedCommands")
     assert not sandbox.get("enableWeakerNestedSandbox")
-    assert sandbox["network"].get("allowedDomains", []) == []
+    assert sandbox.get("network", {}).get("allowedDomains") == []

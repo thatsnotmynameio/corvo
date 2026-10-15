@@ -2,7 +2,7 @@ from dataclasses import replace
 from typing import Any
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions, SandboxSettings
 
 from agents.isolation import assert_isolated
 from agents.scripted import session
@@ -28,6 +28,11 @@ def isolated(given: Session) -> ClaudeAgentOptions:
     )
 
 
+def weakened(**changes: Any) -> SandboxSettings:
+    sandbox: dict[str, Any] = {**sandbox_settings(), **changes}
+    return sandbox  # type: ignore[return-value]
+
+
 def test_options_that_carry_both_halves_pass() -> None:
     given = session()
 
@@ -40,26 +45,66 @@ def test_options_that_carry_both_halves_pass() -> None:
         {"tools": ["Read", "WebFetch"]},
         {"tools": ["WebSearch"], "allowed_tools": ["WebSearch"]},
         {"tools": None},
+        {"permission_mode": "default"},
+        {"setting_sources": ["project"]},
+        {"skills": None},
+        {"strict_mcp_config": False},
+        {"model": None},
+        {"max_turns": 0},
+        {"max_budget_usd": None},
         {"cli_path": None},
         {"env": {}},
         {"sandbox": None},
-        {"sandbox": {**sandbox_settings(), "allowUnsandboxedCommands": True}},
-        {"sandbox": {**sandbox_settings(), "network": {"allowedDomains": ["x.io"]}}},
     ],
     ids=[
         "web fetch",
         "web search",
         "every built-in",
+        "permission prompts",
+        "settings from disk",
+        "every skill",
+        "other MCP servers",
+        "no model",
+        "no turns",
+        "no budget",
         "no wrapper",
         "no run values",
-        "no sandbox",
-        "unsandboxed commands",
-        "a network allowlist",
+        "not the session's sandbox",
     ],
 )
-def test_options_missing_either_half_fail(changes: dict[str, Any]) -> None:
+def test_options_that_drop_a_value_fail(changes: dict[str, Any]) -> None:
     given = session()
     options = replace(isolated(given), **changes)
 
     with pytest.raises(AssertionError):
         assert_isolated(options, given)
+
+
+@pytest.mark.parametrize(
+    "sandbox",
+    [
+        weakened(enabled=False),
+        weakened(failIfUnavailable=False),
+        weakened(allowUnsandboxedCommands=True),
+        weakened(excludedCommands=["git"]),
+        weakened(enableWeakerNestedSandbox=True),
+        weakened(network={"allowedDomains": ["x.io"]}),
+        weakened(network={}),
+    ],
+    ids=[
+        "off",
+        "runs unsandboxed when it cannot start",
+        "unsandboxed commands",
+        "excluded commands",
+        "weaker nested sandbox",
+        "a network allowlist",
+        "no network allowlist",
+    ],
+)
+def test_a_session_with_a_weaker_sandbox_fails(sandbox: SandboxSettings) -> None:
+    # The options carry the session's own sandbox, so the sandbox's content
+    # is what fails, not a mismatch with the session.
+    given = replace(session(), sandbox=sandbox)
+
+    with pytest.raises(AssertionError):
+        assert_isolated(isolated(given), given)
