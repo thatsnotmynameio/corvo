@@ -2,6 +2,7 @@
 the cgroup's removal, with the agent and the cgroup tree replaced (R23)."""
 
 import asyncio
+import gc
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -467,7 +468,7 @@ async def test_control_characters_never_reach_the_log(tree: Tree) -> None:
     ctx = FakeContext()
 
     def print_escapes(session: Session) -> None:
-        session.stderr("\x1b[2Jcleared\x07")
+        session.stderr("\x1b[2Jcleared\x07\u2028agent tone: succeeded\u2029")
         session.log("session \x1b]0;title\x07s-1")
         raise AgentRunFailed("bad\x1b[31m\nreason", RunReport(session_id="s\x1b-1"))
 
@@ -476,10 +477,29 @@ async def test_control_characters_never_reach_the_log(tree: Tree) -> None:
 
     assert str(failed.value) == "agent tone failed: bad[31mreason"
     assert ctx.lines == [
-        "agent stderr: [2Jcleared",
+        "agent stderr: [2Jclearedagent tone: succeeded",
         "session ]0;titles-1",
         "agent tone: bad[31mreason, cost=unknown turns=unknown session=s-1",
     ]
+
+
+async def test_an_error_the_agent_raises_after_the_cancel_is_never_printed(
+    tree: Tree, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(sessions, "session_budget", lambda elapsed: 0.01)
+
+    async def fail_on_cancel(session: Session) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            raise Exception("engine said: secret") from None
+
+    with pytest.raises(AgentFailed, match="past its session budget"):
+        await run(Agent(fail_on_cancel))
+    # asyncio reports an unread exception when the task is collected.
+    gc.collect()
+
+    assert "secret" not in caplog.text
 
 
 def test_the_session_budget_ends_a_minute_before_hatchet_s_timeout() -> None:

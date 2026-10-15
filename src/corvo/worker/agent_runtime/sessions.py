@@ -69,6 +69,10 @@ MAX_VALUE = 100
 # A failure's reason when the kernel killed the session for lack of memory.
 OUT_OF_MEMORY = "out of memory"
 
+# The Unicode categories printable drops: control, format and the rest of
+# category C, and the line and paragraph separators.
+UNPRINTABLE = ("C", "Zl", "Zp")
+
 # How long the end may take, under a cancel or a timeout, and how often it
 # looks whether the cgroup has emptied.
 CLEANUP_TIMEOUT = 10
@@ -103,8 +107,11 @@ class InvalidWorkdir(ValueError):
 
 
 def printable(text: str, limit: int = MAX_LINE) -> str:
-    """The text without control characters, cut to limit characters."""
-    kept = "".join(c for c in text if not unicodedata.category(c).startswith("C"))
+    """The text without control characters or line and paragraph separators,
+    which a viewer may break the line at, cut to limit characters."""
+    kept = "".join(
+        c for c in text if not unicodedata.category(c).startswith(UNPRINTABLE)
+    )
     return kept[:limit]
 
 
@@ -273,6 +280,10 @@ async def end(
             while not child.done():
                 cgroup.kill()
                 await asyncio.wait({child}, timeout=POLL_INTERVAL)
+            # Read, or asyncio prints it to the worker's log, and it may quote
+            # what the engine printed.
+            if not child.cancelled():
+                child.exception()
             # A wrapper that joined just after a kill is caught by the next.
             while cgroup.populated():
                 cgroup.kill()
