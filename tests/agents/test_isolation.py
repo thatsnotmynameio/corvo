@@ -1,4 +1,5 @@
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,7 +19,7 @@ def isolated(given: Session) -> ClaudeAgentOptions:
         stderr=given.stderr,
         model="claude-haiku-5-5",
         tools=["Read"],
-        allowed_tools=["Read"],
+        allowed_tools=[],
         permission_mode="dontAsk",
         setting_sources=[],
         skills=[],
@@ -108,3 +109,53 @@ def test_a_session_with_a_weaker_sandbox_fails(sandbox: SandboxSettings) -> None
 
     with pytest.raises(AssertionError):
         assert_isolated(isolated(given), given)
+
+
+WORKDIR = Path("/var/lib/corvo/agents/workdirs/issue-7")
+
+
+def in_workdir(**changes: Any) -> tuple[ClaudeAgentOptions, Session]:
+    given = replace(session(), cwd=WORKDIR)
+    return replace(isolated(given), tools=["Read", "Glob", "Grep"], **changes), given
+
+
+def test_file_reads_scoped_to_the_working_directory_pass() -> None:
+    options, given = in_workdir(allowed_tools=[f"Read(/{WORKDIR}/**)"])
+
+    assert_isolated(options, given)
+
+
+@pytest.mark.parametrize(
+    "allowed",
+    [
+        ["Read"],
+        ["Glob"],
+        ["Grep"],
+        ["Read(**)"],
+        ["Read(//var/lib/corvo/agents/**)"],
+        [f"Glob(/{WORKDIR}/**)"],
+    ],
+    ids=[
+        "Read anywhere",
+        "Glob anywhere",
+        "Grep anywhere",
+        "Read relative",
+        "Read above the working directory",
+        "a Glob rule, which is never consulted",
+    ],
+)
+def test_file_tools_allowed_beyond_the_working_directory_fail(
+    allowed: list[str],
+) -> None:
+    options, given = in_workdir(allowed_tools=allowed)
+
+    with pytest.raises(AssertionError):
+        assert_isolated(options, given)
+
+
+def test_a_file_rule_without_a_working_directory_fails() -> None:
+    given = session()
+    options = replace(isolated(given), allowed_tools=[f"Read(/{WORKDIR}/**)"])
+
+    with pytest.raises(AssertionError):
+        assert_isolated(options, given)

@@ -11,7 +11,10 @@ mcp_message, and ends the session with a result.
 The prompt picks the scenario:
 
 - with no marker, a success result, with the canned structured output of
-  the JSON Schema's title, as CANNED holds it;
+  the JSON Schema's title, as CANNED holds it. For dir-summary's schema, it
+  summarizes its working directory as the files it lists and whether it
+  can write there, and counts the summary's words with the agent's
+  count_words tool;
 - fake:max-turns, an error_max_turns result, then exit 1, as the CLI does;
 - fake:api-error, a success result with is_error, then exit 1;
 - fake:hang, no answer at all, until the process is killed;
@@ -177,6 +180,13 @@ def call_api(prompt: str) -> str:
         return str(response.status)
 
 
+def summarize_workdir() -> str:
+    """The files the working directory holds, and whether it is writable."""
+    names = sorted(entry.name for entry in Path().iterdir() if entry.is_file())
+    access = "writable" if os.access(".", os.W_OK) else "read-only"
+    return f"{len(names)} files, {access}: {', '.join(names)}"
+
+
 def processes() -> list[dict[str, Any]]:
     """Each process /proc lists, by PID and command name."""
     listed = []
@@ -255,6 +265,10 @@ def main() -> int:
     frame = result("success", is_error=False, result=text)
     if schema.get("title") in CANNED:
         frame["structured_output"] = CANNED[schema["title"]]
+    if schema.get("title") == "DirSummaryOutput":
+        summary = summarize_workdir()
+        count = call_tool(incoming, "dir_summary", "count_words", {"text": summary})
+        frame["structured_output"] = {"summary": summary, "word_count": int(count)}
     send(frame)
     # The CLI exits once the SDK closes its stdin.
     for _ in incoming:

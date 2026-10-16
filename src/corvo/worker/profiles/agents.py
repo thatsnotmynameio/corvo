@@ -1,4 +1,5 @@
 from corvo.worker.agent_runtime import startup
+from corvo.worker.agents.dir_summary import dir_summary
 from corvo.worker.agents.tone import tone
 from corvo.worker.defaults import AGENT_MAX_RUNS
 from corvo.worker.profiles import Profile
@@ -12,6 +13,7 @@ PROFILE = Profile(
     name="corvo-agent-worker",
     workflows=[
         tone,
+        dir_summary,
     ],
     slots=AGENT_MAX_RUNS,
     before_start=startup.before_start,

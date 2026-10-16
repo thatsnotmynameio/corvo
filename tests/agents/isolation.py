@@ -15,12 +15,21 @@ from corvo.agents.session import Session
 # Tools that fetch from the network, refused until a network decision covers
 # what the engine itself may reach (KTD24).
 NETWORK_TOOLS = {"WebFetch", "WebSearch"}
+# The built-ins that read files. Read rules cover all three, and Claude Code
+# never consults a Glob or Grep path rule, so only a Read rule may name them.
+FILE_TOOLS = {"Read", "Glob", "Grep"}
 
 
 def assert_isolated(options: ClaudeAgentOptions, session: Session) -> None:
     # The built-ins the agent lists, and no other.
     assert isinstance(options.tools, list)
     assert not NETWORK_TOOLS & {*options.tools, *options.allowed_tools}
+    # File reads only inside the working directory, which reads need no
+    # rule for: a rule may only say so again.
+    for rule in options.allowed_tools:
+        if rule.split("(", 1)[0] in FILE_TOOLS:
+            assert session.cwd is not None, rule
+            assert rule == f"Read(/{session.cwd}/**)", rule
     # Every tool call allowed_tools does not list is denied.
     assert options.permission_mode == "dontAsk"
     # No settings, CLAUDE.md or skills from the host or the working directory.

@@ -20,7 +20,9 @@ from hatchet_sdk import ClientConfig, ClientTLSConfig, Hatchet, V1TaskStatus
 from hatchet_sdk.clients.admin import TaskRunDetail
 from hatchet_sdk.runnables.workflow import Standalone
 
+from corvo.agents.dir_summary.models import DirSummaryOutput
 from corvo.agents.tone.models import ToneInput, ToneOutput
+from corvo.worker.agent_calls import DirSummaryTaskInput
 
 HERE = Path(__file__).parent
 ROOT = HERE.parents[2]
@@ -369,6 +371,28 @@ def tone_stub(hatchet: Hatchet) -> Standalone[ToneInput, ToneOutput]:
     return hatchet.stubs.task(
         name="tone", input_validator=ToneInput, output_validator=ToneOutput
     )
+
+
+def dir_summary_stub(
+    hatchet: Hatchet,
+) -> Standalone[DirSummaryTaskInput, DirSummaryOutput]:
+    return hatchet.stubs.task(
+        name="dir-summary",
+        input_validator=DirSummaryTaskInput,
+        output_validator=DirSummaryOutput,
+    )
+
+
+@pytest.fixture
+def workdir(stack: Stack) -> Iterator[Path]:
+    """A working directory below <root>/workdirs, as a caller creates one
+    (KTD7), removed after. Anyone may write it, the agent worker's uid 1000
+    included whatever the runner's uid, so only the sandbox's read-only bind
+    keeps a session from writing there."""
+    path = Path(tempfile.mkdtemp(dir=stack.agent_root / "workdirs"))
+    path.chmod(0o777)
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
