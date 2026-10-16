@@ -69,14 +69,14 @@ async def run_log(hatchet: Hatchet, task_run_id: str, pattern: str) -> list[str]
 
 async def served(hatchet: Hatchet, worker: str, since: datetime) -> set[str]:
     """The workflows whose tasks the workers of that name ran since then."""
-    names: set[str | None] = set()
+    names: set[str] = set()
     for each in (await hatchet.workers.aio_list()).rows or []:
         if each.name == worker:
             listed = await hatchet.runs.aio_list(
                 since=since, worker_id=each.metadata.id, only_tasks=True
             )
-            names |= {row.workflow_name for row in listed.rows}
-    return {name or "" for name in names}
+            names |= {row.workflow_name or "" for row in listed.rows}
+    return names
 
 
 async def ended(worker: AgentWorker) -> None:
