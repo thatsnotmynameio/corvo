@@ -102,6 +102,10 @@ async def test_only_a_listed_prefix_starts_the_parser(hatchet: Hatchet) -> None:
         later = await hatchet.event.aio_push(unique("github"), {})
         await finished_run(hatchet, later.event_id)
 
+    # A listed event's id is the one its runs are found by, so the corvo
+    # event's id below can find a run if the parser started one.
+    received = (await hatchet.event.aio_list(keys=[key])).rows or []
+    assert [event.metadata.id for event in received] == [pushed.event_id]
     for event_id in (jira.event_id, corvo.metadata.id):
         listed = await hatchet.runs.aio_list(triggering_event_external_id=event_id)
         assert listed.rows == [], event_id
