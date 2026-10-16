@@ -176,11 +176,14 @@ async def test_a_worker_that_cannot_isolate_registers_nothing(
 async def test_a_run_before_any_agent_worker_registered_is_dropped(
     agent_worker: AgentWorker, hatchet: Hatchet
 ) -> None:
-    # The first deployment's case, for docs/agents.md: triggering a task no
-    # worker has ever registered returns a run's ID, but the engine keeps no
-    # run, even once a worker registers the task.
+    # The first deployment's case, for docs/agents.md: a run of a task no
+    # worker has ever registered is lost. The engine either refuses the
+    # trigger, or returns a run's ID and keeps no run, even once a worker
+    # registers the task; both have been seen.
     first_run = agent_worker.first_run
-    assert isinstance(first_run, str), repr(first_run)
-
+    if isinstance(first_run, Exception):
+        assert "workflow names not found: tone" in str(first_run), repr(first_run)
+        return
+    assert isinstance(first_run, str)
     with pytest.raises(NotFoundException):
         await hatchet.runs.aio_get_status(first_run)
