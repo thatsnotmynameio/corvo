@@ -19,9 +19,9 @@ Hatchet can evict to free its slot while it waits.
 https://docs.hatchet.run/v1/durable-tasks.md
 
 Declare the workflow and its steps at module top level and add the workflow
-to WORKFLOWS in corvo.worker.worker. Keep Hatchet's by-name stubs out of this
-area: a stub is a workflow too, and every workflow here is one the worker
-must serve.
+to the main profile's list in corvo.worker.profiles.main. Keep Hatchet's
+by-name stubs out of this area: a stub is a workflow too, and every workflow
+here is one the worker must serve.
 """
 
 from hatchet_sdk import Context, NonRetryableException

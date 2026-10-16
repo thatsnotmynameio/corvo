@@ -23,6 +23,22 @@ class Settings(BaseSettings):
     hatchet_token: str = ""
     # none: the engine's gRPC has no TLS, as compose runs it.
     hatchet_tls_strategy: Literal["tls", "mtls", "none"] = "none"
+    # The permission profile corvo-worker serves: main, or agents for the
+    # agent worker. corvo.worker.profiles names each one.
+    worker_profile: str = "main"
+    # The directory the agents' working directories live under, in workdirs.
+    agent_root: str = ""
+    # Which Claude credential the proxy holds; corvo never holds it.
+    # oauth_token: a `claude setup-token` token, which lasts a year. Anthropic's
+    # terms allow it only for the subscriber's own ordinary use; a product or
+    # service built on the Agent SDK must use an API key.
+    agent_credential_kind: Literal["api_key", "oauth_token"] = "api_key"
+    # The credential proxy, every session's ANTHROPIC_BASE_URL.
+    agent_proxy_url: str = ""
+    # The cgroup delegated to the agent worker, which holds each run's cgroup.
+    agent_cgroup_root: str = "/sys/fs/cgroup/agents"
+    # The engine every session runs; the agent-worker image sets it.
+    agent_engine: str = ""
 
     def get_postgres_dsn(self) -> str:
         # Built as Polar builds it: URL.create escapes the password.

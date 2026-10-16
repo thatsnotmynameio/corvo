@@ -1,6 +1,10 @@
 # Laid over compose.yaml by the integration tests: the engine's gRPC and the
 # API reach the host, on the free ports the tests pick, so a worker and a
 # client outside compose reach them at the addresses the token holds.
+#
+# The agent worker runs the fake claude CLI as its sessions' engine, with an
+# agents' root the tests make, and the credential proxy forwards to the
+# scripted API in the Claude API's place (KTD14).
 services:
   hatchet-engine:
     ports:
@@ -9,3 +13,29 @@ services:
   hatchet-dashboard:
     ports: !override
       - "127.0.0.1:${HATCHET_TEST_API_PORT:?Variable not set}:80"
+
+  agent-worker:
+    environment:
+      CORVO_AGENT_ROOT: ${CORVO_TEST_AGENT_ROOT:?Variable not set}
+      CORVO_AGENT_ENGINE: /opt/corvo/fake/claude
+    volumes: !override
+      - ${CORVO_TEST_AGENT_ROOT:?Variable not set}:${CORVO_TEST_AGENT_ROOT:?Variable not set}
+      # In a directory of its own, which the wrapper binds into each sandbox.
+      - ./tests/agents/fake_claude.py:/opt/corvo/fake/claude:ro
+
+  claude-proxy:
+    environment:
+      CORVO_AGENT_UPSTREAM: http://scripted-api:8080
+
+  scripted-api:
+    image: python:3.14.7-slim
+    command:
+      - sh
+      - -c
+      - >-
+        echo '[]' >/tmp/script.json &&
+        exec python /scripted/scripted_api.py 0.0.0.0 8080 /tmp/script.json /tmp/log.jsonl
+    volumes:
+      - ./tests/agents/scripted_api.py:/scripted/scripted_api.py:ro
+    networks:
+      - agents

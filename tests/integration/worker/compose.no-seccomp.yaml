@@ -1,0 +1,7 @@
+# The agent worker without its seccomp profile, so Docker's default one keeps
+# bubblewrap from making its namespaces, and its start must refuse (AE10).
+services:
+  agent-worker:
+    security_opt: !override
+      - systempaths=unconfined
+      - writable-cgroups=true

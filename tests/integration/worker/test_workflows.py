@@ -3,7 +3,6 @@ import uuid
 
 import pytest
 from hatchet_sdk import Hatchet, V1TaskStatus
-from hatchet_sdk.clients.admin import TaskRunDetail
 from hatchet_sdk.runnables.workflow import Standalone
 
 from corvo.worker.tasks.hello import HelloInput, HelloOutput
@@ -14,20 +13,7 @@ from corvo.worker.workflows.greeting_rounds import (
     GreetingRoundsOutput,
 )
 
-DONE = {V1TaskStatus.COMPLETED, V1TaskStatus.FAILED, V1TaskStatus.CANCELLED}
-
-
-async def finished_tasks(
-    hatchet: Hatchet, run_id: str, count: int
-) -> dict[str, TaskRunDetail]:
-    """Polls the run's details until its `count` tasks are done, keyed by
-    name, as Hatchet's on_failure test does. The caller bounds the wait."""
-    while True:
-        details = await hatchet.runs.aio_get_details(run_id)
-        tasks = {task.readable_id: task for task in details.task_runs.values()}
-        if len(tasks) == count and all(task.status in DONE for task in tasks.values()):
-            return tasks
-        await asyncio.sleep(1)
+from .conftest import finished_tasks
 
 
 @pytest.mark.usefixtures("worker")

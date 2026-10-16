@@ -30,9 +30,10 @@ request needs a key of its own: with a reused key, an older approval within
 the lookback approves the new run. An approval pushed after the timeout
 matches nothing and is lost.
 
-Declare the task at module top level and add it to WORKFLOWS in
-corvo.worker.worker. Keep Hatchet's by-name stubs out of this area: a stub is
-a workflow too, and every workflow here is one the worker must serve.
+Declare the task at module top level and add it to the main profile's list
+in corvo.worker.profiles.main. Keep Hatchet's by-name stubs out of this area:
+a stub is a workflow too, and every workflow here is one the worker must
+serve.
 """
 
 from datetime import timedelta
