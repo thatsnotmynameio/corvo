@@ -49,7 +49,12 @@ type Text = Annotated[str, StringConstraints(min_length=1, max_length=255)]
 
 
 def _in_utc(value: datetime) -> datetime:
-    return value.astimezone(UTC)
+    # Near datetime's limits an offset can push the instant out of range in
+    # UTC; that fails as a ValidationError, like any invalid field (KTD10).
+    try:
+        return value.astimezone(UTC)
+    except OverflowError:
+        raise ValueError("occurred_at is out of range in UTC") from None
 
 
 def _own_id(data: dict[str, Any]) -> Any:

@@ -89,6 +89,16 @@ def test_a_naive_occurred_at_fails() -> None:
 
 
 @pytest.mark.parametrize(
+    "occurred_at",
+    ["0001-01-01T00:00:00+14:00", "9999-12-31T23:59:59-12:00"],
+    ids=["before the first instant in utc", "after the last instant in utc"],
+)
+def test_an_occurred_at_outside_utcs_range_fails(occurred_at: str) -> None:
+    with pytest.raises(ValidationError):
+        Event(name="issue.opened", source="corvo.server", occurred_at=occurred_at)
+
+
+@pytest.mark.parametrize(
     "chain",
     [
         {"id": CHILD_ID, "root_id": ROOT_ID},
