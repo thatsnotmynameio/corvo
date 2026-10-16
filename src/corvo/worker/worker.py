@@ -1,3 +1,4 @@
+import dataclasses
 import importlib
 import logging
 import signal
@@ -37,7 +38,8 @@ def install_sigterm(hook: Callable[[], None]) -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
-    name = get_settings().worker_profile
+    settings = get_settings()
+    name = settings.worker_profile
     if name not in PROFILES:
         logger.error(
             "unknown worker profile %r: the profiles are %s",
@@ -46,4 +48,8 @@ def main() -> None:
         )
         sys.exit(1)
     # By name, so the main profile never imports the agents profile's tasks.
-    serve(importlib.import_module(PROFILES[name]).PROFILE)
+    profile: Profile = importlib.import_module(PROFILES[name]).PROFILE
+    # Blank keeps the profile's name: Hatchet's names hold no spaces.
+    if worker_name := settings.worker_name.strip():
+        profile = dataclasses.replace(profile, name=worker_name)
+    serve(profile)

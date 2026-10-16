@@ -29,3 +29,9 @@ An agent run fails a re-run before its session starts: from inside the run the t
 
 ### Placeholder credential
 The fixed stand-in credential every session sends in place of a real one, which the credential proxy replaces before forwarding to the Claude API. A real credential never enters an Outer sandbox.
+
+## Workers
+
+### Permission profile
+The area of code a worker serves, named by `CORVO_WORKER_PROFILE`: the tasks and workflows it registers, and so the permissions it needs, such as `main` or `agents`. A worker serves exactly one profile and registers only that profile's definitions, so a task never runs on a worker holding more permissions than its profile. Every profile has a compose service, and every worker service states its profile.
+*Avoid:* worker role

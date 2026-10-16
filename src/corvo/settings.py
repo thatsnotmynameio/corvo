@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # The permission profile corvo-worker serves: main, or agents for the
     # agent worker. corvo.worker.profiles names each one.
     worker_profile: str = "main"
+    # The name the worker registers under in Hatchet, in place of its
+    # profile's, which tells apart two services on one profile.
+    worker_name: str = ""
     # The directory the agents' working directories live under, in workdirs.
     agent_root: str = ""
     # Which Claude credential the proxy holds; corvo never holds it.

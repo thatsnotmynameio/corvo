@@ -7,7 +7,8 @@ dotted path here, so the main profile never imports an agent task. This
 module imports no profile module.
 
 A new profile is a module with its PROFILE, a line in PROFILES, an area pair
-in tests/worker/test_registration.py and a compose service.
+in tests/worker/test_registration.py and a compose service that sets
+CORVO_WORKER_PROFILE, which tests/worker/test_compose.py checks.
 """
 
 from collections.abc import Callable

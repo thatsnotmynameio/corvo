@@ -89,6 +89,9 @@ services:
     restart: always
     command: ["corvo-worker"]
     environment:
+      # Every worker service states its profile, which
+      # tests/worker/test_compose.py checks.
+      CORVO_WORKER_PROFILE: main
       CORVO_HATCHET_TOKEN: ${HATCHET_CLIENT_TOKEN?Variable not set}
       CORVO_HATCHET_TLS_STRATEGY: ${HATCHET_CLIENT_TLS_STRATEGY:?Variable not set}
     depends_on:

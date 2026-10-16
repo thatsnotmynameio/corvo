@@ -57,6 +57,7 @@ def test_main_serves_the_main_profile_by_default(
     events: list[tuple[str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("CORVO_WORKER_PROFILE", raising=False)
+    monkeypatch.delenv("CORVO_WORKER_NAME", raising=False)
     profile = corvo.worker.profiles.main.PROFILE
 
     with pytest.raises(Started):
@@ -88,6 +89,59 @@ def test_main_serves_the_profile_its_variable_names(
         ),
         ("start", {}),
     ]
+
+
+def test_main_registers_under_the_name_its_variable_sets(
+    events: list[tuple[str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CORVO_WORKER_PROFILE", raising=False)
+    monkeypatch.setenv("CORVO_WORKER_NAME", "corvo-worker-a")
+    profile = corvo.worker.profiles.main.PROFILE
+
+    with pytest.raises(Started):
+        main()
+
+    assert events == [
+        ("corvo-worker-a", {"slots": None, "workflows": profile.workflows}),
+        ("start", {}),
+    ]
+
+
+def test_the_name_keeps_the_agents_profiles_slots_and_workflows(
+    events: list[tuple[str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CORVO_WORKER_PROFILE", "agents")
+    monkeypatch.setenv("CORVO_WORKER_NAME", "corvo-agent-worker-b")
+    profile = dataclasses.replace(
+        corvo.worker.profiles.agents.PROFILE, before_start=None
+    )
+    monkeypatch.setattr(corvo.worker.profiles.agents, "PROFILE", profile)
+
+    with pytest.raises(Started):
+        main()
+
+    assert events == [
+        (
+            "corvo-agent-worker-b",
+            {"slots": profile.slots, "workflows": profile.workflows},
+        ),
+        ("start", {}),
+    ]
+
+
+@pytest.mark.parametrize("blank", ["", "  "])
+def test_a_blank_name_keeps_the_profiles_name(
+    events: list[tuple[str, dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    blank: str,
+) -> None:
+    monkeypatch.delenv("CORVO_WORKER_PROFILE", raising=False)
+    monkeypatch.setenv("CORVO_WORKER_NAME", blank)
+
+    with pytest.raises(Started):
+        main()
+
+    assert events[0][0] == "corvo-worker"
 
 
 def test_main_exits_on_an_unknown_profile_before_any_worker(
