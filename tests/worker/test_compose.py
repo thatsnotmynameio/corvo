@@ -6,10 +6,11 @@ service that forgets it starts without complaint and serves main with
 whatever credentials compose gives it. A profile no service serves leaves its
 runs queued until they time out. This test reads compose.yaml and the
 Dockerfile stages its services build, and decides which services run
-corvo-worker: by their command, or by the CMD of the stage they build. It
-names each worker service that states no profile, each service whose
-CORVO_WORKER_PROFILE is not a literal name in PROFILES, and each profile with
-no service. It also fails on a service whose command it cannot work out.
+corvo-worker: wherever it appears in their entrypoint and command, or in the
+CMD of the stage they build. It names each worker service that states no
+profile, each service whose CORVO_WORKER_PROFILE is not a literal name in
+PROFILES, and each profile with no service. It also fails on a service whose
+command it cannot work out.
 """
 
 import json
@@ -74,18 +75,34 @@ class Unknown(Exception):
     """What a service runs cannot be told; its message names the service."""
 
 
+def arguments(given: str | list[str] | None) -> tuple[str, ...]:
+    """A compose entrypoint or command, split as compose splits a string."""
+    if given is None:
+        return ()
+    return tuple(given) if isinstance(given, list) else tuple(shlex.split(given))
+
+
 def command(
     name: str, service: Mapping[str, Any], built: Sequence[Stage]
 ) -> tuple[str, ...]:
     """The command the service runs, or Unknown when that cannot be told."""
-    if "command" in service:
-        given = service["command"]
-        return tuple(given) if isinstance(given, list) else tuple(shlex.split(given))
+    if "entrypoint" in service or "command" in service:
+        return arguments(service.get("entrypoint")) + arguments(service.get("command"))
     if "build" not in service:
         # An image's own command, which runs no corvo-worker.
         return ()
     build = service["build"]
-    target = build.get("target") if isinstance(build, Mapping) else None
+    if not isinstance(build, Mapping):
+        build = {"context": build}
+    # Only the root Dockerfile is read.
+    context = build.get("context", ".")
+    dockerfile = build.get("dockerfile", "Dockerfile")
+    if (context, dockerfile) != (".", "Dockerfile"):
+        raise Unknown(
+            f"{name} builds {dockerfile} in {context}, which the check does not "
+            "read, so what it runs is unknown"
+        )
+    target = build.get("target")
     if target is None:
         index = len(built) - 1
     else:
@@ -136,7 +153,8 @@ def problems(
         except Unknown as unknown:
             unprofiled.append(str(unknown))
             continue
-        if runs[:1] == (WORKER,):
+        # Wherever it appears: behind uv run or sh -c, it still starts.
+        if any(WORKER in argument for argument in runs):
             unprofiled.append(
                 f"{name} runs {WORKER} without {VARIABLE}, so it serves main: "
                 "set the profile it serves"
@@ -274,6 +292,45 @@ def test_a_build_without_a_target_runs_the_last_stage() -> None:
     )
 
     assert problems(services, STAGES, PROFILES) == []
+
+
+def test_a_worker_behind_a_wrapper_is_named() -> None:
+    services = compose(
+        """\
+  wrapped:
+    command: uv run corvo-worker
+  entered:
+    image: ghcr.io/example/corvo
+    entrypoint: ["corvo-worker"]
+"""
+    )
+
+    found = problems(services, STAGES, PROFILES)
+
+    assert found == [
+        "wrapped runs corvo-worker without CORVO_WORKER_PROFILE, so it serves "
+        "main: set the profile it serves",
+        "entered runs corvo-worker without CORVO_WORKER_PROFILE, so it serves "
+        "main: set the profile it serves",
+    ]
+
+
+def test_a_build_from_another_dockerfile_is_named() -> None:
+    services = compose(
+        """\
+  elsewhere:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+"""
+    )
+
+    found = problems(services, STAGES, PROFILES)
+
+    assert found == [
+        "elsewhere builds Dockerfile.worker in ., which the check does not "
+        "read, so what it runs is unknown"
+    ]
 
 
 def test_a_target_the_dockerfile_lacks_is_named() -> None:
