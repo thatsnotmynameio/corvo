@@ -4,7 +4,9 @@ An event is validated when created and never changes after, at any depth.
 It carries its own id, its parent's id and its chain's root id, so a chain
 of events reads like the spans of a trace. A root event is built through
 the constructor, with no parent, and its root id is its own id; every
-other event is built by its parent's `child`.
+other event is built by its parent's `child`. An event built from one
+another system produced keeps that event's id there as its external id,
+which a child never inherits.
 
 Every invalid event fails with Pydantic's ValidationError.
 
@@ -70,6 +72,7 @@ class Event(BaseModel):
     id: UUID = Field(default_factory=uuid.uuid7)
     parent_id: UUID | None = None
     root_id: UUID = Field(default_factory=_own_id)
+    external_id: Text | None = None
     name: Text
     payload_version: Annotated[int, Field(ge=1, strict=True)] = 1
     source: Text
