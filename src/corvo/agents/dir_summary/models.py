@@ -23,6 +23,9 @@ class DirSummaryInput(BaseModel):
 # output: the agent derives nothing from it. Its JSON Schema goes to the
 # model, docstrings included, so the comments here are not docstrings.
 class DirSummaryOutput(BaseModel):
+    # The bounds hold the prompt's "under 200 words" with room, and stay
+    # within tone's input, so a workflow can hand a summary to tone: an empty
+    # or overlong summary fails this run, not the step that hands it on.
     summary: str = Field(min_length=1, max_length=2000)
     # The count the agent's custom tool, count_words, returned for the
     # summary, as the model reports it: nothing checks it against the tool.
