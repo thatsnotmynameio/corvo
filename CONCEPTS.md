@@ -41,6 +41,8 @@ The area of code a worker serves, named by `CORVO_WORKER_PROFILE`: the tasks and
 ### Event
 An immutable record that something happened, the unit corvo's work receives and emits. Nothing in it changes after creation, at any depth. It carries its own id, its parent's id and its chain's root id, so a chain of events reads like the spans of a trace.
 
+An event built from an External event also carries that event's id, as its external id. Its children never inherit it, so only the root of the chain points back outside corvo.
+
 ### Root id
 The id of the first event in a chain, carried by every event descended from it, so a whole chain is found without walking from parent to parent. A root event's root id is its own id.
 
@@ -52,4 +54,4 @@ A key-value pair of strings on an event, meant to be counted, as in how many eve
 *Avoid:* tag
 
 ### External event
-An event a source outside corvo publishes to Hatchet, under a key that starts with that source's prefix, such as `github:issue:opened`. It is not a corvo event: the external event parser turns it into a root corvo event named `corvo:external_event:` followed by its key, whose external id is the external event's Hatchet id.
+An event a source outside corvo publishes to the task engine, under a key that starts with that source's prefix, such as `github:issue:opened`. It is not a corvo event: the external event parser turns it into a root corvo event named `corvo:external_event:` followed by its key, whose external id is the id the task engine gave the external event.
