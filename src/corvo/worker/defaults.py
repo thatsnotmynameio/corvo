@@ -28,6 +28,12 @@ EXECUTION_TIMEOUT = timedelta(minutes=10)
 # spawns nothing twice.
 WAITING_EXECUTION_TIMEOUT = timedelta(minutes=65)
 
+# How long a run an outside event started waits for a worker, in place of
+# Hatchet's 5 minutes. The engine cancels a run that waits longer, so every
+# event that arrives while the main worker is down past it would be lost,
+# with no log from corvo. A day covers an outage noticed the next morning.
+EVENT_SCHEDULE_TIMEOUT = timedelta(hours=24)
+
 # How many agent runs execute at once across the worker pool. The strategy
 # is named and scoped to the tenant, so every agent task shares the one
 # limit, and so does every deployment on the tenant. CANCEL_IN_PROGRESS

@@ -2,12 +2,13 @@
 
 Hatchet starts a worker without complaint when a definition is missing from
 its list, and lets a duplicate name win silently. This test maps each area
-to its profile, corvo.worker.tasks and corvo.worker.workflows to main and
-corvo.worker.agents to agents, and checks each profile's list against every
-module-level definition in its areas. It names each one that is on no
-worker, on a profile other than its area's, listed twice or sharing a name
-with another on any profile. It also fails on what would hide a definition
-from it: a directory without __init__.py, or a module that fails to import.
+to its profile, corvo.worker.tasks, corvo.worker.workflows and
+corvo.worker.event_gateway to main and corvo.worker.agents to agents, and
+checks each profile's list against every module-level definition in its
+areas. It names each one that is on no worker, on a profile other than its
+area's, listed twice or sharing a name with another on any profile. It also
+fails on what would hide a definition from it: a directory without
+__init__.py, or a module that fails to import.
 """
 
 import importlib
@@ -25,6 +26,7 @@ from pydantic import BaseModel
 
 import corvo.worker.agent_calls
 import corvo.worker.agents
+import corvo.worker.event_gateway
 import corvo.worker.tasks
 import corvo.worker.workflows
 from corvo.settings import get_settings
@@ -33,7 +35,7 @@ from corvo.worker.profiles import PROFILES
 
 # Each profile's areas: an agent task belongs on the agent worker alone.
 AREAS = {
-    "main": [corvo.worker.tasks, corvo.worker.workflows],
+    "main": [corvo.worker.tasks, corvo.worker.workflows, corvo.worker.event_gateway],
     "agents": [corvo.worker.agents],
 }
 
