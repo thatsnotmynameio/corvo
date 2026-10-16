@@ -169,7 +169,8 @@ services:
   # only service holding the Claude credential. It forwards the sessions'
   # Messages API calls to the Claude API with the credential in place of
   # their placeholder, and nothing else. It is on agents for the agent worker
-  # and on default for its way out. Its admin API is off.
+  # and on egress, a network of its own, for its way out: on default, every
+  # service there could spend through it. Its admin API is off.
   claude-proxy:
     image: caddy:2.11.7-alpine
     restart: always
@@ -179,7 +180,7 @@ services:
     volumes:
       - ./src/corvo/agents/Caddyfile:/etc/caddy/Caddyfile:ro
     networks:
-      - default
+      - egress
       - agents
 
   # Hatchet, after its Docker Compose guide
@@ -294,3 +295,5 @@ networks:
   # and nothing outside; only the proxy also reaches the outside (KTD24).
   agents:
     internal: true
+  # The credential proxy's way out, and no other service's.
+  egress:

@@ -168,8 +168,14 @@ def proxies() -> Iterator[dict[str, Proxy]]:
         containers.append(upstream)
         image = proxy_image()
         found = {}
-        for kind in ("api_key", "oauth_token"):
-            name = f"corvo-proxy-{kind}-{run}"
+        # One proxy per kind, and one whose upstream refuses connections: its
+        # 502 is the request Caddy logs, headers and all, at its default level.
+        for key, kind, address in (
+            ("api_key", "api_key", f"{upstream}:8080"),
+            ("oauth_token", "oauth_token", f"{upstream}:8080"),
+            ("unreachable", "api_key", "127.0.0.1:9"),
+        ):
+            name = f"corvo-proxy-{key}-{run}"
             docker(
                 "run",
                 "--detach",
@@ -184,7 +190,7 @@ def proxies() -> Iterator[dict[str, Proxy]]:
                 "--env",
                 f"CORVO_AGENT_CREDENTIAL_KIND={kind}",
                 "--env",
-                f"CORVO_AGENT_UPSTREAM=http://{upstream}:8080",
+                f"CORVO_AGENT_UPSTREAM=http://{address}",
                 "--volume",
                 f"{CADDYFILE}:/etc/caddy/Caddyfile:ro",
                 image,
@@ -192,7 +198,7 @@ def proxies() -> Iterator[dict[str, Proxy]]:
             containers.append(name)
             port = int(docker("port", name, "8080/tcp").rsplit(":", 1)[1])
             listening(port)
-            found[kind] = Proxy(name, port, f"{upstream}:8080", directory / "log.jsonl")
+            found[key] = Proxy(name, port, address, directory / "log.jsonl")
         yield found
     finally:
         for container in containers:
@@ -255,6 +261,14 @@ def test_an_oauth_token_replaces_the_placeholder(proxies: dict[str, Proxy]) -> N
         ("POST", "/v1/files"),
         ("GET", "/v1/messages"),
         ("POST", "/v1/messages/batches"),
+        # Paths that clean to an allowed one, which Caddy would forward as
+        # sent: the API may resolve them to another endpoint.
+        ("POST", "/v1/files/../messages"),
+        ("POST", "/v1/messages/batches//.."),
+        ("POST", "/v1/messages/batches/..%2Fx/.."),
+        ("POST", "//v1/messages"),
+        ("POST", "/V1/MESSAGES"),
+        ("POST", "/v1/messages/"),
     ],
 )
 def test_anything_else_is_not_found(
@@ -355,16 +369,22 @@ def test_a_long_stream_reaches_the_client_whole_event_by_event(
 
 
 def test_its_log_holds_no_header(proxies: dict[str, Proxy]) -> None:
+    unreachable = proxies["unreachable"]
     credentials = [
         ("x-api-key", PLACEHOLDER),
         ("authorization", f"Bearer {PLACEHOLDER}"),
     ]
+
+    status, _ = unreachable.send("POST", "/v1/messages", QUICK, credentials)
+
+    assert status == 502
+    errors = [
+        json.loads(line)
+        for line in unreachable.logs().splitlines()
+        if '"http.log.error"' in line
+    ]
+    assert [error["request"]["uri"] for error in errors] == ["/v1/messages"]
     for proxy in proxies.values():
-        proxy.send("POST", "/v1/messages", b"x" * (33 * 1024**2), credentials)
-        proxy.send("GET", "/v1/models", headers=credentials)
-
         logs = proxy.logs().lower()
-
-        assert logs
         for secret in (TEST_CREDENTIAL, PLACEHOLDER, "x-api-key", "authorization"):
             assert secret not in logs, proxy.container

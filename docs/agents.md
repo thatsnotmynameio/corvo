@@ -30,7 +30,9 @@ CORVO_AGENT_CREDENTIAL=sk-ant-...
 - **`api_key`**, the one for a product or service: an API key from a Claude Console workspace of its own, with a spend limit on that workspace. The spend limit is what bounds an agent's spending; corvo puts no ceiling of its own on a run. In the key's Console organization, turn off web search and web fetch: the proxy refuses the betas that make the API fetch from an address a request names, but web search needs no beta header.
 - **`oauth_token`**: a token from `claude setup-token`, which lasts a year. Anthropic's terms allow a subscription only for the subscriber's own ordinary use: anything built on the Agent SDK for others must use an API key. The consumer terms and the subscriber's privacy settings, not the commercial terms, then govern the code the sessions send. A subscription has no Console organization, so web search and web fetch cannot be turned off for it.
 
-To change the credential, edit `.env` and run `docker compose up -d claude-proxy`. Sessions in flight while the proxy restarts may fail.
+To change the credential, edit `.env` and run `docker compose up -d claude-proxy`. When its kind changes too, run `docker compose up -d claude-proxy agent-worker`: the agent worker picks the placeholder each session sends by kind. Sessions in flight while the proxy restarts may fail.
+
+The proxy cannot see one way the API fetches on a request's behalf: an image or a document block whose source is a URL makes the API fetch that address, with no beta header and no setting to turn it off. A session that escaped into its engine could use it to send data out. Shell commands never reach the proxy, since the SDK's sandbox gives them no network.
 
 ## What a session's output carries
 
