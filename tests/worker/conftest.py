@@ -22,6 +22,7 @@ def tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tree]:
     get_settings.cache_clear()
     replaced = Tree(tmp_path / "cgroup")
     monkeypatch.setattr(cgroups, "create", replaced.create)
+    monkeypatch.setattr(sessions, "refusal", None)
     yield replaced
     get_settings.cache_clear()
     sessions.in_flight.clear()
