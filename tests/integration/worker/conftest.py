@@ -385,10 +385,12 @@ def dir_summary_stub(
 
 @pytest.fixture
 def workdir(stack: Stack) -> Iterator[Path]:
-    """A working directory below <root>/workdirs, readable by the agent
-    worker's uid 1000, as a caller creates one (KTD7), removed after."""
+    """A working directory below <root>/workdirs, as a caller creates one
+    (KTD7), removed after. Anyone may write it, the agent worker's uid 1000
+    included whatever the runner's uid, so only the sandbox's read-only bind
+    keeps a session from writing there."""
     path = Path(tempfile.mkdtemp(dir=stack.agent_root / "workdirs"))
-    path.chmod(0o755)
+    path.chmod(0o777)
     yield path
     shutil.rmtree(path, ignore_errors=True)
 

@@ -24,5 +24,6 @@ class DirSummaryInput(BaseModel):
 # model, docstrings included, so the comments here are not docstrings.
 class DirSummaryOutput(BaseModel):
     summary: str = Field(min_length=1, max_length=2000)
-    # As count_words, the agent's custom tool, counted the summary's words.
+    # The count the agent's custom tool, count_words, returned for the
+    # summary, as the model reports it: nothing checks it against the tool.
     word_count: int = Field(ge=0)
