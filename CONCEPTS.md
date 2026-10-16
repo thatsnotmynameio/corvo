@@ -17,8 +17,15 @@ The fresh bubblewrap sandbox each session's Engine runs in, started with an empt
 ### Command sandbox
 The Claude Agent SDK's own sandbox, which every shell command an Engine runs goes through, nested inside the Outer sandbox, with credentials scrubbed from the command's environment and its network limited to an allowlist. A session that would let a command run outside it is refused.
 
+The Command sandbox and the Outer sandbox are not two copies of one protection: each closes openings the other leaves, so a session always runs inside both.
+
 ### Run cgroup
 The cgroup made for one run before its session starts and removed after it, which limits that session's memory, CPU and processes without touching the Agent worker's own.
+
+### Re-run
+A second execution of a task run that the task engine starts on its own, after the run's worker stopped answering, or that a replay from the dashboard starts, as opposed to a new run someone triggers.
+
+An agent run fails a re-run before its session starts: from inside the run the two causes look the same, and either would pay for a session again. To run an agent again, trigger a new run, or replay the step that spawned it, which starts a fresh run.
 
 ### Placeholder credential
 The fixed stand-in credential every session sends in place of a real one, which the credential proxy replaces before forwarding to the Claude API. A real credential never enters an Outer sandbox.
