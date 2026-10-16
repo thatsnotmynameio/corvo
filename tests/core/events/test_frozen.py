@@ -86,6 +86,15 @@ def test_a_payload_with_a_non_finite_number_fails_from_json(text: str) -> None:
         Holder.model_validate_json(text)
 
 
+def test_a_payload_nested_past_the_recursion_limit_fails() -> None:
+    payload: dict[str, object] = {}
+    for _ in range(3000):
+        payload = {"a": payload}
+
+    with pytest.raises(ValidationError):
+        Holder(payload=payload)
+
+
 @pytest.mark.parametrize(
     "payload",
     [{"a": b"x"}, {1: "x"}],
@@ -108,10 +117,22 @@ def test_a_payload_holding_another_payload_freezes_as_plain_data() -> None:
 
 @pytest.mark.parametrize(
     "labels",
-    [{"repo": 1}, {"1abc": "x"}, {"repo": ""}, {b"repo": "x"}, {"repo": b"x"}],
+    [
+        {"repo": 1},
+        {"1abc": "x"},
+        {"a-b": "x"},
+        {"a.b": "x"},
+        {"repo\n": "x"},
+        {"repo": ""},
+        {b"repo": "x"},
+        {"repo": b"x"},
+    ],
     ids=[
         "a number value",
         "a key with a digit first",
+        "a key with a hyphen",
+        "a key with a dot",
+        "a key with a trailing newline",
         "an empty value",
         "a bytes key",
         "a bytes value",

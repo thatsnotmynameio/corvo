@@ -107,6 +107,15 @@ def thaw(value: object) -> object:
     return value
 
 
+def _thaw_input(value: object) -> object:
+    # A Python payload nested past the interpreter's recursion limit fails
+    # like any other invalid payload, as a ValidationError (KTD10).
+    try:
+        return thaw(value)
+    except RecursionError:
+        raise ValueError("a payload must not nest this deeply") from None
+
+
 def _payload_schema(
     _source: object, handler: Callable[[Any], core_schema.CoreSchema]
 ) -> core_schema.CoreSchema:
@@ -114,7 +123,7 @@ def _payload_schema(
     # part of it; then validated as plain JSON, and frozen.
     plain = handler(dict[str, JsonValue])
     return core_schema.no_info_before_validator_function(
-        thaw,
+        _thaw_input,
         core_schema.no_info_after_validator_function(freeze, plain),
         serialization=core_schema.plain_serializer_function_ser_schema(
             thaw, return_schema=plain

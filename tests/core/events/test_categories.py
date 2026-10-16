@@ -55,6 +55,10 @@ def test_a_name_with_letters_digits_underscores_and_hyphens_passes() -> None:
     assert Category(id=BILLING.id, name="bill-ing_2").name == "bill-ing_2"
 
 
+def test_a_name_of_255_characters_passes() -> None:
+    assert Category(id=BILLING.id, name="a" * 255).name == "a" * 255
+
+
 def test_a_snapshot_with_an_empty_path_fails() -> None:
     with pytest.raises(ValidationError):
         CategorySnapshot(id=BILLING.id, path=())
@@ -69,6 +73,23 @@ def test_assigning_to_a_category_fails() -> None:
     with pytest.raises(ValidationError):
         INVOICES.name = "bills"  # type: ignore[misc]
     assert INVOICES.name == "invoices"
+
+
+def test_assigning_to_a_snapshot_fails() -> None:
+    snapshot = INVOICES.snapshot()
+
+    with pytest.raises(ValidationError):
+        snapshot.path = ("bills",)  # type: ignore[misc]
+    assert snapshot.path == ("billing", "invoices")
+
+
+def test_a_field_the_category_models_do_not_define_fails() -> None:
+    with pytest.raises(ValidationError):
+        Category.model_validate({"id": BILLING.id, "name": "billing", "kind": "x"})
+    with pytest.raises(ValidationError):
+        CategorySnapshot.model_validate(
+            {"id": BILLING.id, "path": ["billing"], "kind": "x"}
+        )
 
 
 def test_a_category_field_keeps_the_snapshot_of_a_category() -> None:
