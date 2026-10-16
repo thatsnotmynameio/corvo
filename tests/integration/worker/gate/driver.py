@@ -18,17 +18,19 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     CLINotFoundError,
     ResultMessage,
-    SandboxSettings,
     query,
 )
 
+from corvo.agents.session import sandbox_settings
+from corvo.worker.agent_runtime.cgroups import create, read_keyed
 from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
+from corvo.worker.defaults import AGENT_MEMORY, AGENT_PIDS_LIMIT, AGENT_TMPFS_SIZE
 
 HERE = Path(__file__).parent
 TESTS = HERE.parents[2]
@@ -40,16 +42,8 @@ MIB = 1024**2
 # A secret the worker holds, which nothing in the sandbox may see.
 WORKER_SECRET = "gate-hatchet-token"
 
-SANDBOX = cast(
-    SandboxSettings,
-    {
-        "enabled": True,
-        "autoAllowBashIfSandboxed": True,
-        "allowUnsandboxedCommands": False,
-        "failIfUnavailable": True,
-        "network": {"allowedDomains": []},
-    },
-)
+# Every session's own sandbox settings, so the gate proves what agents run.
+SANDBOX = sandbox_settings()
 
 # The session's one Bash call: a marker, then the network interfaces the
 # command sees, which only the SDK's own sandbox narrows to loopback.
@@ -77,13 +71,15 @@ result = ctypes.CFUNCTYPE(ctypes.c_int)(base)()
 print("opened" if result >= 0 else errno.errorcode.get(-result, str(-result)))
 """
 
+# Joins the cgroup in argv[1], forks argv[2] times, past its process limit,
+# then allocates argv[3] MiB, past its memory limit.
 HOG = """
 import os, sys, time
 with open(os.path.join(sys.argv[1], "cgroup.procs"), "w") as procs:
     procs.write(str(os.getpid()))
 children = []
 try:
-    for _ in range(80):
+    for _ in range(int(sys.argv[2])):
         pid = os.fork()
         if pid == 0:
             time.sleep(30)
@@ -95,7 +91,7 @@ for pid in children:
     os.kill(pid, 9)
     os.waitpid(pid, 0)
 held = []
-for _ in range(1024):
+for _ in range(int(sys.argv[3])):
     held.append(b"x" * (1024 * 1024))
 print("allocated", len(held), flush=True)
 """
@@ -186,20 +182,10 @@ def outside() -> dict[str, Any]:
     return {"outcome": outcome, "seconds": round(time.monotonic() - started, 2)}
 
 
-def run_cgroup(name: str, memory: int, pids: int) -> Path:
-    """A run's cgroup with KTD21's limits, made as the worker makes one."""
-    (AGENTS / "cgroup.subtree_control").write_text("+cpu +memory +pids")
-    path = AGENTS / name
-    path.mkdir()
-    for limit, value in (
-        ("memory.max", str(memory)),
-        ("memory.swap.max", "0"),
-        ("memory.oom.group", "1"),
-        ("cpu.max", "100000 100000"),
-        ("pids.max", str(pids)),
-    ):
-        (path / limit).write_text(value)
-    return path
+def run_cgroup(name: str) -> Path:
+    """A run's cgroup, run-<name>, made by the worker's own cgroups.create with
+    a session's limits."""
+    return create(AGENTS, name).path
 
 
 def run_env(cgroup: Path, engine: str) -> dict[str, str]:
@@ -210,7 +196,7 @@ def run_env(cgroup: Path, engine: str) -> dict[str, str]:
         "CORVO_SANDBOX_WORKDIR": "",
         "CORVO_SANDBOX_WRITES": "0",
         "CORVO_SANDBOX_ENGINE": engine,
-        "CORVO_SANDBOX_TMPFS": str(64 * MIB),
+        "CORVO_SANDBOX_TMPFS": str(AGENT_TMPFS_SIZE),
         "ANTHROPIC_API_KEY": PLACEHOLDER,
     }
 
@@ -224,7 +210,7 @@ def pids_peak(cgroup: Path) -> int:
 def probe() -> Any:
     """The probe in the engine's place, in a read-only working directory of
     its own, as a run with one gets."""
-    cgroup = run_cgroup("run-gate-probe", 256 * MIB, 64)
+    cgroup = run_cgroup("gate-probe")
     workdir = tempfile.mkdtemp(prefix="corvo-gate-", dir="/var/tmp")
     settings = json.dumps({"sandbox": SANDBOX})
     ran = subprocess.run(
@@ -280,7 +266,7 @@ async def session(directory: Path) -> dict[str, Any]:
         ]
     )
     stderr: list[str] = []
-    cgroup = run_cgroup("run-gate-session", 1024 * MIB, 256)
+    cgroup = run_cgroup("gate-session")
     options = ClaudeAgentOptions(
         cli_path=WRAPPER,
         tools=["Bash"],
@@ -334,17 +320,18 @@ async def without_cli_path() -> str:
     return "no error"
 
 
-def cgroup_events(path: Path) -> dict[str, int]:
-    """A cgroup's memory.events or pids.events, as counts by name."""
-    lines = path.read_text().splitlines()
-    return {key: int(value) for key, value in (line.split() for line in lines)}
-
-
 def hog() -> dict[str, Any]:
-    cgroup = run_cgroup("run-gate-hog", 64 * MIB, 32)
+    cgroup = run_cgroup("gate-hog")
     worker_cgroup = Path("/proc/self/cgroup").read_text()
     ran = subprocess.run(
-        [sys.executable, "-c", HOG, str(cgroup)],
+        [
+            sys.executable,
+            "-c",
+            HOG,
+            str(cgroup),
+            str(AGENT_PIDS_LIMIT + 20),
+            str(AGENT_MEMORY // MIB + 256),
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -353,11 +340,11 @@ def hog() -> dict[str, Any]:
     return {
         "returncode": ran.returncode,
         "stdout": ran.stdout.split("\n")[:-1],
-        "memory.events": cgroup_events(cgroup / "memory.events"),
-        "pids.events": cgroup_events(cgroup / "pids.events"),
+        "memory.events": read_keyed(cgroup / "memory.events"),
+        "pids.events": read_keyed(cgroup / "pids.events"),
         "worker cgroup unchanged": Path("/proc/self/cgroup").read_text()
         == worker_cgroup,
-        "worker memory.events": cgroup_events(AGENTS / "worker" / "memory.events"),
+        "worker memory.events": read_keyed(AGENTS / "worker" / "memory.events"),
     }
 
 

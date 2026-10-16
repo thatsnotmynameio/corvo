@@ -77,7 +77,10 @@ def test_main_serves_the_profile_its_variable_names(
         main()
 
     assert events == [
-        ("corvo-agent-worker", {"slots": profile.slots, "workflows": []}),
+        (
+            "corvo-agent-worker",
+            {"slots": profile.slots, "workflows": profile.workflows},
+        ),
         ("start", {}),
     ]
 

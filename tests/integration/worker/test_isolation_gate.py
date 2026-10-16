@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
+from corvo.worker.defaults import AGENT_PIDS_LIMIT
 
 from .conftest import ROOT, docker_available
 
@@ -257,7 +258,7 @@ def test_the_hog_stops_at_its_process_limit_and_dies_at_its_memory_limit(
 
     forks, created, error = hog["stdout"][0].split()
     assert (forks, error) == ("forks", "11"), hog
-    assert int(created) < 32
+    assert int(created) < AGENT_PIDS_LIMIT
     assert hog["pids.events"]["max"] >= 1
     assert hog["returncode"] == -9, hog
     assert hog["memory.events"]["oom_kill"] >= 1

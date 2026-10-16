@@ -6,6 +6,7 @@ import pytest
 
 import corvo.worker.profiles.agents
 import corvo.worker.profiles.main
+from corvo.worker.agents.tone import tone
 from corvo.worker.defaults import AGENT_CONCURRENCY
 from corvo.worker.profiles import PROFILES, Profile
 
@@ -45,5 +46,5 @@ def test_the_agents_profile_takes_as_many_runs_as_the_cap() -> None:
     profile = corvo.worker.profiles.agents.PROFILE
 
     assert profile.name == "corvo-agent-worker"
-    assert profile.workflows == []
+    assert profile.workflows == [tone]
     assert profile.slots == AGENT_CONCURRENCY.max_runs
