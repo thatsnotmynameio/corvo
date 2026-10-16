@@ -6,6 +6,7 @@ The tests that stop the agent worker come last, and each starts it again.
 """
 
 import asyncio
+import json
 import re
 
 import pytest
@@ -14,8 +15,15 @@ from hatchet_sdk.clients.admin import TaskRunDetail
 from hatchet_sdk.clients.rest.exceptions import NotFoundException
 
 from corvo.agents.tone.models import ToneInput, ToneOutput
+from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
 
-from .conftest import NO_SECCOMP, AgentWorker, finished_tasks, tone_stub
+from .conftest import (
+    NO_SECCOMP,
+    TEST_CREDENTIAL,
+    AgentWorker,
+    finished_tasks,
+    tone_stub,
+)
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -70,6 +78,23 @@ async def test_tone_returns_the_engine_s_verdict(
     assert output == FRIENDLY
     assert agent_worker.run_cgroups() == []
     assert agent_worker.session_processes() == []
+
+
+async def test_tone_reaches_the_api_through_the_proxy_with_its_credential(
+    agent_worker: AgentWorker, hatchet: Hatchet
+) -> None:
+    before = len(await asyncio.to_thread(agent_worker.api_requests))
+
+    async with asyncio.timeout(60):
+        output = await tone_stub(hatchet).aio_run(ToneInput(text="fake:api Hi!"))
+
+    assert output == FRIENDLY
+    requests = (await asyncio.to_thread(agent_worker.api_requests))[before:]
+    assert [request["path"] for request in requests] == ["/v1/messages"]
+    headers = {name.lower(): value for name, value in requests[0]["headers"].items()}
+    assert headers["x-api-key"] == TEST_CREDENTIAL
+    assert "authorization" not in headers
+    assert PLACEHOLDER not in json.dumps(requests)
 
 
 async def test_tone_at_its_turn_limit_fails_without_a_retry(

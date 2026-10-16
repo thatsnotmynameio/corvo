@@ -122,9 +122,10 @@ services:
       HATCHET_CLIENT_HOST_PORT: hatchet-engine:7070
       HATCHET_CLIENT_WORKER_HEALTHCHECK_ENABLED: "True"
       CORVO_AGENT_ROOT: /var/lib/corvo/agents
-      # CORVO_AGENT_PROXY_URL, the sessions' ANTHROPIC_BASE_URL, names the
-      # credential proxy. This stack runs none yet, so the agent worker
-      # refuses its start on settings and restarts.
+      # The sessions' ANTHROPIC_BASE_URL, and which placeholder they send:
+      # the proxy puts the credential in its place.
+      CORVO_AGENT_PROXY_URL: http://claude-proxy:8080
+      CORVO_AGENT_CREDENTIAL_KIND: ${CORVO_AGENT_CREDENTIAL_KIND:?Variable not set}
     volumes:
       - agent-root:/var/lib/corvo/agents
     security_opt:
@@ -161,6 +162,25 @@ services:
     depends_on:
       hatchet-engine:
         condition: service_started
+      claude-proxy:
+        condition: service_started
+
+  # The credential proxy (KTD22): Caddy, with src/corvo/agents/Caddyfile, the
+  # only service holding the Claude credential. It forwards the sessions'
+  # Messages API calls to the Claude API with the credential in place of
+  # their placeholder, and nothing else. It is on agents for the agent worker
+  # and on default for its way out. Its admin API is off.
+  claude-proxy:
+    image: caddy:2.11.7-alpine
+    restart: always
+    environment:
+      CORVO_AGENT_CREDENTIAL: ${CORVO_AGENT_CREDENTIAL:?Variable not set}
+      CORVO_AGENT_CREDENTIAL_KIND: ${CORVO_AGENT_CREDENTIAL_KIND:?Variable not set}
+    volumes:
+      - ./src/corvo/agents/Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - default
+      - agents
 
   # Hatchet, after its Docker Compose guide
   # (https://docs.hatchet.run/self-hosting/docker-compose), with PostgreSQL as
@@ -271,6 +291,6 @@ volumes:
 
 networks:
   # Internal: the agent worker reaches the engine and the credential proxy,
-  # and nothing outside (KTD24).
+  # and nothing outside; only the proxy also reaches the outside (KTD24).
   agents:
     internal: true

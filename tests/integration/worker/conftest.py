@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import shutil
 import signal
@@ -12,6 +13,7 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
 from hatchet_sdk import ClientConfig, ClientTLSConfig, Hatchet, V1TaskStatus
@@ -31,6 +33,10 @@ APPARMOR = HERE / "compose.apparmor.yaml"
 NO_SECCOMP = HERE / "compose.no-seccomp.yaml"
 
 USERNS_SYSCTL = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+
+# The credential the test stack's proxy holds, which reaches only the scripted
+# API.
+TEST_CREDENTIAL = "corvo-test-credential"
 
 # What bubblewrap needs from the container, and nothing more of the host.
 BUBBLEWRAP = [
@@ -87,7 +93,7 @@ def docker_available() -> bool:
 
 def write_env_file(path: Path, grpc_port: int, api_port: int, agent_root: Path) -> None:
     """.env.example, with the engine and the API on the host's free ports,
-    and the agents' root the tests made."""
+    the agents' root the tests made, and the test credential."""
     overrides = {
         "HATCHET_TEST_GRPC_PORT": str(grpc_port),
         "HATCHET_TEST_API_PORT": str(api_port),
@@ -95,6 +101,7 @@ def write_env_file(path: Path, grpc_port: int, api_port: int, agent_root: Path) 
         "HATCHET_SERVER_URL": f"http://localhost:{api_port}",
         "HATCHET_AUTH_COOKIE_DOMAIN": f"localhost:{api_port}",
         "CORVO_TEST_AGENT_ROOT": str(agent_root),
+        "CORVO_AGENT_CREDENTIAL": TEST_CREDENTIAL,
     }
     lines = [
         line
@@ -339,6 +346,13 @@ class AgentWorker:
 
     def logs(self) -> str:
         return self.run("logs", "--no-log-prefix", "agent-worker").stdout
+
+    def api_requests(self) -> list[dict[str, Any]]:
+        """Each request the scripted API received, through the proxy."""
+        read = self.run(
+            "exec", "-T", "scripted-api", "sh", "-c", "cat /tmp/log.jsonl || true"
+        )
+        return [json.loads(line) for line in read.stdout.splitlines()]
 
     def run_cgroups(self) -> list[str]:
         listed = self.run("exec", "-T", "agent-worker", "ls", "/sys/fs/cgroup/agents")
