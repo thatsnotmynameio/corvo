@@ -1,6 +1,6 @@
-"""tone and dir-summary end to end: on the real Hatchet, in the agent worker's compose
-service, in real bubblewrap and cgroups, with the fake claude CLI as its
-sessions' engine (U9, R24).
+"""tone and dir-summary end to end: on the real Hatchet, in the agent
+worker's compose service, in real bubblewrap and cgroups, with the fake
+claude CLI as its sessions' engine (U9, R24).
 
 The tests that stop the agent worker come last, and each starts it again.
 """
