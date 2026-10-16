@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from uuid import UUID
 
 import pytest
@@ -132,11 +132,16 @@ def test_a_child_carries_what_it_is_given() -> None:
 
 
 def test_a_child_given_occurred_at_keeps_it_in_utc() -> None:
+    brasilia = timezone(timedelta(hours=-3))
+
     child = labeled_root().child(
-        name="issue.triaged", source="corvo.worker", occurred_at=NOON_UTC
+        name="issue.triaged",
+        source="corvo.worker",
+        occurred_at=datetime(2026, 10, 16, 12, 0, tzinfo=brasilia),
     )
 
-    assert child.occurred_at == NOON_UTC
+    assert child.occurred_at == datetime(2026, 10, 16, 15, 0, tzinfo=UTC)
+    assert child.occurred_at.tzinfo is UTC
 
 
 @pytest.mark.parametrize(
