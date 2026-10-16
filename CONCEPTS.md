@@ -35,3 +35,18 @@ The fixed stand-in credential every session sends in place of a real one, which 
 ### Permission profile
 The area of code a worker serves, named by `CORVO_WORKER_PROFILE`: the tasks and workflows it registers, and so the permissions it needs, such as `main` or `agents`. A worker serves exactly one profile and registers only that profile's definitions, so a task never runs on a worker holding more permissions than its profile. Every profile has a compose service, and every worker service states its profile.
 *Avoid:* worker role
+
+## Events
+
+### Event
+An immutable record that something happened, the unit corvo's work receives and emits. Nothing in it changes after creation, at any depth. It carries its own id, its parent's id and its chain's root id, so a chain of events reads like the spans of a trace.
+
+### Root id
+The id of the first event in a chain, carried by every event descended from it, so a whole chain is found without walking from parent to parent. A root event's root id is its own id.
+
+### Category
+A node in a tree of categories, each with an optional parent, that classifies an event. Categories are data that live outside code and grow there; an event references an existing one and never creates one. An event without a category has `unknown`, a fixed category with no parent.
+
+### Label
+A key-value pair of strings on an event, meant to be counted, as in how many events carry `repo=corvo`.
+*Avoid:* tag
