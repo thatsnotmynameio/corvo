@@ -15,7 +15,6 @@ import os
 import subprocess
 import uuid
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,33 +22,12 @@ import pytest
 from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
 from corvo.worker.defaults import AGENT_PIDS_LIMIT
 
-from .conftest import ROOT, docker_available
+from .conftest import BUBBLEWRAP, ROOT, docker_available, lift_apparmor
 
 IMAGE = "corvo-agent-worker:gate"
 SECCOMP = ROOT / "src" / "corvo" / "worker" / "agent_runtime" / "seccomp.json"
 DRIVER = "/app/tests/integration/worker/gate/driver.py"
-USERNS_SYSCTL = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
-
-# What bubblewrap needs from the container, and nothing more of the host.
-BUBBLEWRAP = [
-    "bwrap",
-    "--unshare-all",
-    "--die-with-parent",
-    "--ro-bind",
-    "/usr",
-    "/usr",
-    "--symlink",
-    "usr/lib",
-    "/lib",
-    "--symlink",
-    "usr/lib64",
-    "/lib64",
-    "--proc",
-    "/proc",
-    "--dev",
-    "/dev",
-    "/usr/bin/true",
-]
+UNCONFINED = ["--security-opt", "apparmor=unconfined"]
 
 # The variables a session's engine may hold (KTD20), and the PWD bubblewrap
 # sets for its --chdir.
@@ -80,32 +58,6 @@ def run(options: list[str], *command: str) -> subprocess.CompletedProcess[str]:
         text=True,
         timeout=300,
     )
-
-
-def lift_apparmor(options: list[str]) -> list[str]:
-    """KTD15's CI-only branch: each adjustment, in order, until bubblewrap
-    starts. It appends apparmor=unconfined to options when that is needed,
-    and returns the adjustments it made."""
-    adjustments: list[str] = []
-    started = run(options, *BUBBLEWRAP)
-    if started.returncode == 0:
-        return adjustments
-    if not os.environ.get("CI"):
-        pytest.fail(f"bubblewrap is refused in the agent worker: {started.stderr}")
-    if USERNS_SYSCTL.exists() and USERNS_SYSCTL.read_text().strip() == "1":
-        subprocess.run(
-            ["sudo", "sysctl", "-w", "kernel.apparmor_restrict_unprivileged_userns=0"],
-            check=True,
-        )
-        adjustments.append("kernel.apparmor_restrict_unprivileged_userns=0")
-        started = run(options, *BUBBLEWRAP)
-    if started.returncode != 0:
-        options.extend(["--security-opt", "apparmor=unconfined"])
-        adjustments.append("apparmor=unconfined")
-        started = run(options, *BUBBLEWRAP)
-    if started.returncode != 0:
-        pytest.fail(f"bubblewrap is refused after {adjustments}: {started.stderr}")
-    return adjustments
 
 
 @pytest.fixture(scope="module")
@@ -139,7 +91,14 @@ def report(pytestconfig: pytest.Config) -> Iterator[dict[str, Any]]:
         f"{ROOT / 'tests'}:/app/tests:ro",
     ]
     try:
-        adjustments = lift_apparmor(options)
+        adjustments = lift_apparmor(
+            lambda unconfined: run(
+                options + UNCONFINED if unconfined else options, *BUBBLEWRAP
+            ),
+            "the agent worker",
+        )
+        if "apparmor=unconfined" in adjustments:
+            options.extend(UNCONFINED)
         ran = run(options, "python", DRIVER)
         assert ran.returncode == 0, ran.stderr
         found: dict[str, Any] = json.loads(ran.stdout.splitlines()[-1])

@@ -1,0 +1,6 @@
+# Laid over the others on CI only, when Docker's docker-default AppArmor
+# profile keeps bubblewrap from making its namespaces (KTD15).
+services:
+  agent-worker:
+    security_opt:
+      - apparmor=unconfined

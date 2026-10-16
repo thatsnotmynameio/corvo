@@ -6,13 +6,15 @@ runs an agent itself.
 
 1. It fails a re-run (KTD8), and a working directory outside
    <root>/workdirs (KTD7), before anything exists.
-2. It creates the run's cgroup (corvo.worker.agent_runtime.cgroups) and
-   builds the Session: the wrapper as cli_path, the wrapper's per-run
-   variables and the credential's placeholder as env, and the SDK's sandbox.
+2. It creates the run's cgroup (corvo.worker.agent_runtime.cgroups), fails
+   the run when the worker is stopping (KTD19), and builds the Session: the
+   wrapper as cli_path, the wrapper's per-run variables and the credential's
+   placeholder as env, and the SDK's sandbox.
 3. It starts the agent's run as a child task and waits for it, bounded by
-   the session budget. The wait forwards neither a cancel nor the deadline
-   into the child: a cancel would start the SDK's transport close, which can
-   take 15 seconds, and the kill comes first.
+   the session budget, and ends the wait once the worker is stopping. The
+   wait forwards neither a cancel nor the deadline into the child: a cancel
+   would start the SDK's transport close, which can take 15 seconds, and
+   the kill comes first.
 4. However the session ended, result, failure, budget, Hatchet's timeout or
    cancel, it kills the cgroup before anything else. Then it cancels the
    child, which lets the SDK close its transport, waits until the child is
@@ -92,6 +94,11 @@ CREDENTIAL_VARIABLES = {
 # The cgroups of this worker's sessions that have not been removed, which
 # the SIGTERM hook kills.
 in_flight: set[Path] = set()
+
+# Why this worker takes no more runs, once the SIGTERM hook has set it
+# (KTD19). A run then fails at once, and a session the hook killed fails with
+# it as its reason.
+refusal: str | None = None
 
 # An agent package's run (KTD1).
 type AgentRun[I, O] = Callable[[I, Session], Coroutine[Any, Any, tuple[O, RunReport]]]
@@ -218,6 +225,13 @@ async def run_agent[I: BaseModel, O: BaseModel](
     except OSError as error:
         raise AgentFailed(f"agent {agent}: cannot create its cgroup: {error}") from None
     in_flight.add(cgroup.path)
+    # Only once the cgroup is in flight: a SIGTERM hook that ran before the
+    # add set the refusal, and one that runs after it kills the cgroup.
+    if refusal is not None:
+        with contextlib.suppress(OSError):
+            cgroup.remove()
+            in_flight.discard(cgroup.path)
+        raise AgentFailed(f"agent {agent}: {refusal}")
     session = Session(
         cli_path=WRAPPER,
         cwd=cwd,
@@ -228,8 +242,15 @@ async def run_agent[I: BaseModel, O: BaseModel](
     )
     child = asyncio.create_task(run(input, session))
     cancelled = False
+    ends = time.monotonic() + session_budget(time.monotonic() - started)
     try:
-        await asyncio.wait({child}, timeout=session_budget(time.monotonic() - started))
+        # In slices, so a SIGTERM hook whose kill came before the wrapper
+        # joined the cgroup still ends the session within one.
+        while not child.done() and refusal is None:
+            left = ends - time.monotonic()
+            if left <= 0:
+                break
+            await asyncio.wait({child}, timeout=min(left, POLL_INTERVAL))
     except asyncio.CancelledError:
         cancelled = True
         raise
@@ -348,6 +369,8 @@ def conclude[O](
 
     if out_of_memory:
         reason = OUT_OF_MEMORY
+    elif refusal is not None:
+        reason = refusal
     shown = printable(reason, MAX_VALUE)
     log(report_line(agent, shown, report))
     raise AgentFailed(f"agent {agent} failed: {shown}")

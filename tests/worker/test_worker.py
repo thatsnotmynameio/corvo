@@ -1,3 +1,4 @@
+import dataclasses
 import signal
 from collections.abc import Iterator
 from types import FrameType
@@ -71,7 +72,11 @@ def test_main_serves_the_profile_its_variable_names(
     events: list[tuple[str, dict[str, Any]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("CORVO_WORKER_PROFILE", "agents")
-    profile = corvo.worker.profiles.agents.PROFILE
+    # Without its start checks, which need the agent worker's container.
+    profile = dataclasses.replace(
+        corvo.worker.profiles.agents.PROFILE, before_start=None
+    )
+    monkeypatch.setattr(corvo.worker.profiles.agents, "PROFILE", profile)
 
     with pytest.raises(Started):
         main()
@@ -99,6 +104,24 @@ def test_main_exits_on_an_unknown_profile_before_any_worker(
     assert caplog.messages == [
         "unknown worker profile 'database': the profiles are agents, main"
     ]
+    assert events == []
+
+
+def test_a_refused_agents_start_exits_before_any_worker(
+    events: list[tuple[str, dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("CORVO_WORKER_PROFILE", "agents")
+    monkeypatch.setenv("CORVO_AGENT_ROOT", "")
+
+    with pytest.raises(SystemExit) as exited:
+        main()
+
+    assert exited.value.code == 1
+    assert caplog.messages[-1] == (
+        "agents refused: settings: CORVO_AGENT_ROOT is not set"
+    )
     assert events == []
 
 

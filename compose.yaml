@@ -95,6 +95,73 @@ services:
       hatchet-engine:
         condition: service_started
 
+  # The agent worker (KTD13, KTD18): corvo-worker serving the agents profile,
+  # which runs each agent session in a bubblewrap sandbox and a cgroup of its
+  # own. It holds the Hatchet token but neither the database password nor the
+  # Claude credential, and reaches only the engine and the credential proxy,
+  # on the internal agents network. Its start checks its isolation and exits
+  # when that fails, so it registers no agent task it cannot isolate.
+  #
+  # Its entrypoint runs as root only to hand uid 1000 the container's cgroup
+  # subtree, which writable-cgroups makes writable. The seccomp profile is
+  # Docker's plus the calls bubblewrap needs (KTD23), and systempaths lets
+  # bubblewrap mount a /proc of its own. tini reaps what an ended session
+  # leaves. The container's own limits leave room for one session past the
+  # cap's and the worker, under each session's cgroup.
+  agent-worker:
+    build:
+      context: .
+      target: agent-worker
+    restart: always
+    init: true
+    environment:
+      CORVO_WORKER_PROFILE: agents
+      CORVO_HATCHET_TOKEN: ${HATCHET_CLIENT_TOKEN?Variable not set}
+      CORVO_HATCHET_TLS_STRATEGY: ${HATCHET_CLIENT_TLS_STRATEGY:?Variable not set}
+      # The engine, on the agents network, whatever address the token holds.
+      HATCHET_CLIENT_HOST_PORT: hatchet-engine:7070
+      HATCHET_CLIENT_WORKER_HEALTHCHECK_ENABLED: "True"
+      CORVO_AGENT_ROOT: /var/lib/corvo/agents
+      # CORVO_AGENT_PROXY_URL, the sessions' ANTHROPIC_BASE_URL, names the
+      # credential proxy. This stack runs none yet, so the agent worker
+      # refuses its start on settings and restarts.
+    volumes:
+      - agent-root:/var/lib/corvo/agents
+    security_opt:
+      - seccomp=src/corvo/worker/agent_runtime/seccomp.json
+      - systempaths=unconfined
+      - writable-cgroups=true
+    # 3 sessions of AGENT_MEMORY and AGENT_PIDS_LIMIT, and the worker.
+    mem_limit: 7g
+    memswap_limit: 7g
+    pids_limit: 1024
+    # SIGTERM ends the in-flight sessions, then Hatchet waits for their runs
+    # to fail (KTD19).
+    stop_grace_period: 30s
+    networks:
+      - agents
+    # As uid 1000, the worker's own user.
+    healthcheck:
+      test:
+        - CMD
+        - setpriv
+        - --reuid=1000
+        - --regid=1000
+        - --clear-groups
+        - --no-new-privs
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://localhost:8001/health")
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # The start checks take up to 45 seconds.
+      start_period: 60s
+      start_interval: 2s
+    depends_on:
+      hatchet-engine:
+        condition: service_started
+
   # Hatchet, after its Docker Compose guide
   # (https://docs.hatchet.run/self-hosting/docker-compose), with PostgreSQL as
   # its message queue in place of RabbitMQ. Its images are pinned to the
@@ -168,6 +235,10 @@ services:
     environment: *hatchet-environment
     volumes:
       - hatchet-config:/hatchet/config
+    # The agent worker reaches it on agents, the other workers on default.
+    networks:
+      - default
+      - agents
     depends_on:
       hatchet-db:
         condition: service_healthy
@@ -195,3 +266,11 @@ volumes:
   db-data:
   hatchet-db-data:
   hatchet-config:
+  # The agents' root: their working directories, in workdirs (KTD7).
+  agent-root:
+
+networks:
+  # Internal: the agent worker reaches the engine and the credential proxy,
+  # and nothing outside (KTD24).
+  agents:
+    internal: true

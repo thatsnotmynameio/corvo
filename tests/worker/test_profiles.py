@@ -6,6 +6,7 @@ import pytest
 
 import corvo.worker.profiles.agents
 import corvo.worker.profiles.main
+from corvo.worker.agent_runtime import startup
 from corvo.worker.agents.tone import tone
 from corvo.worker.defaults import AGENT_CONCURRENCY
 from corvo.worker.profiles import PROFILES, Profile
@@ -48,3 +49,10 @@ def test_the_agents_profile_takes_as_many_runs_as_the_cap() -> None:
     assert profile.name == "corvo-agent-worker"
     assert profile.workflows == [tone]
     assert profile.slots == AGENT_CONCURRENCY.max_runs
+
+
+def test_the_agents_profile_checks_its_isolation_and_ends_its_sessions() -> None:
+    profile = corvo.worker.profiles.agents.PROFILE
+
+    assert profile.before_start is startup.before_start
+    assert profile.on_sigterm is startup.on_sigterm

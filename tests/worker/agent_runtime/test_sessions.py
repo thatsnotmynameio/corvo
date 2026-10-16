@@ -207,6 +207,58 @@ async def test_a_re_run_fails_before_any_cgroup(tree: Tree) -> None:
     assert agent.sessions == []
 
 
+async def test_a_run_on_a_stopping_worker_fails_before_its_session(
+    tree: Tree,
+) -> None:
+    # The SIGTERM hook landing between the cgroup's creation and its entry in
+    # the in-flight set, which the hook kills.
+    tree.after_create = lambda: setattr(sessions, "refusal", "worker stopping")
+    agent = Agent()
+
+    with pytest.raises(AgentFailed, match="^agent tone: worker stopping$"):
+        await run(agent)
+
+    assert tree.events == ["create", "remove"]
+    assert agent.sessions == []
+    assert sessions.in_flight == set()
+
+
+async def test_a_session_the_stop_kills_fails_as_worker_stopping(tree: Tree) -> None:
+    ctx = FakeContext()
+    report = RunReport(session_id="s-1")
+
+    def stop_then_die(session: Session) -> None:
+        sessions.refusal = "worker stopping"
+        raise AgentRunFailed("process_failed", report)
+
+    with pytest.raises(AgentFailed, match="^agent tone failed: worker stopping$"):
+        await run(Agent(stop_then_die), ctx)
+
+    assert ctx.lines[-1] == (
+        "agent tone: worker stopping, cost=unknown turns=unknown session=s-1"
+    )
+
+
+async def test_a_stop_the_hook_s_kill_missed_still_ends_the_session(
+    tree: Tree,
+) -> None:
+    # The hook ran after the refusal check, while the cgroup was still empty,
+    # so its one kill missed the wrapper that joined after it.
+    agent = Agent(tree=tree)
+
+    def stop_then_run_on(session: Session) -> object:
+        sessions.refusal = "worker stopping"
+        return agent.hang()
+
+    agent.act = stop_then_run_on
+
+    async with asyncio.timeout(2):
+        with pytest.raises(AgentFailed, match="^agent tone failed: worker stopping$"):
+            await run(agent)
+
+    assert tree.events == ["create", "kill", "kill", "agent cleanup", "remove"]
+
+
 async def test_a_failed_session_fails_the_run_with_its_report(tree: Tree) -> None:
     ctx = FakeContext()
     report = RunReport(
