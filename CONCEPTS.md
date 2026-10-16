@@ -50,3 +50,6 @@ A node in a tree of categories, each with an optional parent, that classifies an
 ### Label
 A key-value pair of strings on an event, meant to be counted, as in how many events carry `repo=corvo`.
 *Avoid:* tag
+
+### External event
+An event a source outside corvo publishes to Hatchet, under a key that starts with that source's prefix, such as `github:issue:opened`. It is not a corvo event: the external event parser turns it into a root corvo event named `corvo:external_event:` followed by its key, whose external id is the external event's Hatchet id.
