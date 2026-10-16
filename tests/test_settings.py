@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import make_url
 
 from corvo.settings import Settings
@@ -23,3 +24,39 @@ def test_postgres_dsn_escapes_the_password() -> None:
 
     assert url.password == password
     assert url.host == "localhost"
+
+
+def test_the_credential_kind_reads_oauth_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORVO_AGENT_CREDENTIAL_KIND", "oauth_token")
+
+    assert Settings().agent_credential_kind == "oauth_token"
+
+
+def test_the_credential_kind_rejects_an_unknown_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CORVO_AGENT_CREDENTIAL_KIND", "token")
+
+    with pytest.raises(ValidationError, match="agent_credential_kind"):
+        Settings()
+
+
+def test_the_cgroup_root_defaults_to_the_delegated_agents_cgroup() -> None:
+    assert Settings().agent_cgroup_root == "/sys/fs/cgroup/agents"
+
+
+def test_the_settings_hold_no_credential() -> None:
+    with pytest.raises(ValidationError, match="agent_credential"):
+        Settings(agent_credential="sk-ant-real")  # type: ignore[call-arg]
+
+
+def test_the_worker_profile_defaults_to_main() -> None:
+    assert Settings().worker_profile == "main"
+
+
+def test_the_worker_profile_reads_its_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CORVO_WORKER_PROFILE", "agents")
+
+    assert Settings().worker_profile == "agents"
