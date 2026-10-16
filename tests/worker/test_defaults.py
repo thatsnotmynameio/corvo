@@ -8,6 +8,7 @@ from corvo.worker.defaults import (
     AGENT_EXECUTION_TIMEOUT,
     AGENT_SCHEDULE_TIMEOUT,
     AGENT_WAITING_EXECUTION_TIMEOUT,
+    EVENT_SCHEDULE_TIMEOUT,
     EXECUTION_TIMEOUT,
     RETRIES,
     WAITING_EXECUTION_TIMEOUT,
@@ -33,6 +34,10 @@ def test_an_agent_waiting_timeout_covers_its_one_attempt() -> None:
     worst_case = AGENT_SCHEDULE_TIMEOUT + AGENT_EXECUTION_TIMEOUT + DETECTION_LAG
 
     assert AGENT_WAITING_EXECUTION_TIMEOUT >= worst_case
+
+
+def test_an_event_task_waits_longer_than_hatchets_default() -> None:
+    assert EVENT_SCHEDULE_TIMEOUT > SCHEDULING_TIMEOUT
 
 
 def test_the_session_budget_ends_before_hatchets_timeout() -> None:

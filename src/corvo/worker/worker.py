@@ -37,8 +37,12 @@ def install_sigterm(hook: Callable[[], None]) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig()
     settings = get_settings()
+    # On the root logger itself: basicConfig sets no level once the root has
+    # a handler. Before serve, since Hatchet's log forwarder takes the root's
+    # level when the worker starts.
+    logging.getLogger().setLevel(settings.log_level)
     name = settings.worker_profile
     if name not in PROFILES:
         logger.error(

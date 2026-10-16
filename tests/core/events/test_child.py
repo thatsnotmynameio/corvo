@@ -61,6 +61,16 @@ def test_a_child_with_nothing_inherited_gets_none_of_its_parent() -> None:
     assert child.payload_version == 1
 
 
+def test_a_child_never_carries_its_parents_external_id() -> None:
+    # Covers AE5.
+    parent = Event(name="issue.opened", source="github", external_id="evt-1")
+    assert parent.external_id == "evt-1"
+
+    child = parent.child(name="issue.triaged", source="corvo.worker")
+
+    assert child.external_id is None
+
+
 def test_a_child_inherits_everything_it_asks_for() -> None:
     parent = labeled_root()
 

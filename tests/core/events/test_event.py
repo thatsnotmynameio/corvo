@@ -24,6 +24,7 @@ def full_event() -> Event:
         id=CHILD_ID,
         parent_id=ROOT_ID,
         root_id=ROOT_ID,
+        external_id="evt-1",
         name="issue.opened",
         payload_version=2,
         source="corvo.server",
@@ -42,12 +43,25 @@ def test_a_root_event_given_only_a_name_and_source_has_the_defaults() -> None:
     assert event.id.version == 7
     assert event.parent_id is None
     assert event.root_id == event.id
+    assert event.external_id is None
     assert event.payload_version == 1
     assert event.subject is None
     assert event.occurred_at.tzinfo is UTC
     assert before <= event.occurred_at <= datetime.now(UTC)
     assert event.labels == {}
     assert event.payload == {}
+
+
+def test_an_event_keeps_its_external_id() -> None:
+    event = Event(name="issue.opened", source="corvo.server", external_id="abc")
+
+    assert event.external_id == "abc"
+
+
+def test_an_external_id_of_255_characters_passes() -> None:
+    event = Event(name="issue.opened", source="corvo.server", external_id="a" * 255)
+
+    assert event.external_id == "a" * 255
 
 
 def test_an_event_without_a_category_is_unknown() -> None:
@@ -138,6 +152,8 @@ def test_a_child_built_through_the_constructor_passes() -> None:
         {"name": "a" * 256},
         {"source": ""},
         {"subject": ""},
+        {"external_id": ""},
+        {"external_id": "a" * 256},
         {"payload_version": 0},
         {"payload_version": True},
         {"payload_version": "1"},
@@ -149,6 +165,8 @@ def test_a_child_built_through_the_constructor_passes() -> None:
         "a long name",
         "an empty source",
         "an empty subject",
+        "an empty external id",
+        "a long external id",
         "version 0",
         "version True",
         "version as text",
@@ -206,6 +224,9 @@ def test_a_json_dict_of_an_event_holds_plain_objects_and_arrays() -> None:
     data = full_event().model_dump(mode="json")
 
     assert json.loads(json.dumps(data)) == data
+    assert data["external_id"] == "evt-1"
+    keys = list(data)
+    assert keys.index("external_id") == keys.index("root_id") + 1
     assert data["labels"] == {"repo": "corvo"}
     assert data["payload"]["nested"] == {"a": [1, {"b": None}]}
     assert data["category"] == {

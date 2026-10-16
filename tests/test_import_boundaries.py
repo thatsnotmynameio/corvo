@@ -33,6 +33,7 @@ MAIN_PROFILE = (
 MAIN_PROFILE_AREAS = (
     "corvo.worker.tasks",
     "corvo.worker.workflows",
+    "corvo.worker.event_gateway",
     "corvo.worker.agent_calls",
     "corvo.server",
 )
