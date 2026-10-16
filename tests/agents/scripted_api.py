@@ -9,21 +9,23 @@ request already holds:
 - {"text": "..."} ends the session with that text, where {tool_results}
   becomes the text of the results the request carries, in order.
 
-Past the script's end, the session ends with the tool results. Each request's
-method, path, credential headers and tool results are appended to the log as
-a JSON line.
+A turn with "pause": <seconds> waits that long before each of its stream
+events, as a slow stream does. Past the script's end, the session ends with
+the tool results. Each request's method, path, credential headers, Host and
+tool results are appended to the log as a JSON line.
 
 Usage: python scripted_api.py <host> <port> <script.json> <log.jsonl>
 """
 
 import json
 import sys
+import time
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-CREDENTIAL_HEADERS = ("x-api-key", "authorization", "anthropic-beta")
+RECORDED_HEADERS = ("x-api-key", "authorization", "anthropic-beta", "host")
 
 
 def tool_results(body: dict[str, Any]) -> list[str]:
@@ -131,7 +133,7 @@ def handler(script: list[dict[str, Any]], log: Path) -> type[BaseHTTPRequestHand
                 "headers": {
                     name: value
                     for name, value in self.headers.items()
-                    if name.lower() in CREDENTIAL_HEADERS
+                    if name.lower() in RECORDED_HEADERS
                 },
                 "tool_results": results,
             }
@@ -161,7 +163,10 @@ def handler(script: list[dict[str, Any]], log: Path) -> type[BaseHTTPRequestHand
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")
             self.end_headers()
+            pause = float(turn.get("pause", 0))
             for name, data in events(blocks, stop):
+                if pause:
+                    time.sleep(pause)
                 self.wfile.write(
                     f"event: {name}\ndata: {json.dumps(data)}\n\n".encode()
                 )

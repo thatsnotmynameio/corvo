@@ -8,6 +8,8 @@ cli_path, so a protocol change in an SDK bump fails here. Each runs under a
 import asyncio
 import json
 import os
+import threading
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +27,12 @@ from claude_agent_sdk import (
 from corvo.agents.session import sandbox_settings
 from corvo.agents.tone.models import ToneVerdict
 
+from .scripted_api import handler
+
 FAKE = Path(__file__).with_name("fake_claude.py")
 TIMEOUT = 20
+# Whatever credential the environment holds, the fake sends it.
+PLACEHOLDER = "a-placeholder"
 
 
 async def collect(
@@ -133,6 +139,47 @@ async def test_a_custom_tool_is_called_through_the_sdk() -> None:
     result = last_result(await collect('fake:call words shout {"text": "hi"}', options))
 
     assert result.result == "HI"
+
+
+@pytest.mark.fake_cli
+@pytest.mark.parametrize(
+    ("variable", "headers"),
+    [
+        ("ANTHROPIC_API_KEY", {"X-Api-Key": PLACEHOLDER}),
+        (
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            {
+                "Authorization": f"Bearer {PLACEHOLDER}",
+                "Anthropic-Beta": "oauth-2025-04-20",
+            },
+        ),
+    ],
+)
+async def test_an_api_call_sends_the_credential_as_the_engine_does(
+    tmp_path: Path, variable: str, headers: dict[str, str]
+) -> None:
+    log = tmp_path / "log.jsonl"
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler([], log))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    address = f"127.0.0.1:{server.server_address[1]}"
+    options = ClaudeAgentOptions(
+        cli_path=FAKE,
+        env={variable: PLACEHOLDER, "ANTHROPIC_BASE_URL": f"http://{address}"},
+        output_format={
+            "type": "json_schema",
+            "schema": ToneVerdict.model_json_schema(),
+        },
+    )
+    try:
+        result = last_result(await collect("fake:api", options))
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert ToneVerdict.model_validate(result.structured_output).tone == "friendly"
+    (entry,) = [json.loads(line) for line in log.read_text().splitlines()]
+    assert (entry["method"], entry["path"]) == ("POST", "/v1/messages")
+    assert entry["headers"] == headers | {"Host": address}
 
 
 @pytest.mark.fake_cli

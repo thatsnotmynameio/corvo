@@ -1,8 +1,10 @@
 """The scripted Messages API answers each turn as its script says, in the
 API's stream format, and logs what each request carried."""
 
+import itertools
 import json
 import threading
+import time
 import urllib.request
 from collections.abc import Iterator
 from http.server import ThreadingHTTPServer
@@ -132,7 +134,7 @@ def test_only_the_results_since_the_last_assistant_turn_count(
     assert stream(text)[2][1]["delta"]["text"] == "second"
 
 
-def test_each_request_is_logged_with_its_credential_headers_only(
+def test_each_request_is_logged_with_its_credential_headers_and_host_only(
     api: tuple[str, Path],
 ) -> None:
     url, log = api
@@ -145,10 +147,36 @@ def test_each_request_is_logged_with_its_credential_headers_only(
         "method": "POST",
         "path": "/v1/messages",
         "turn": 0,
-        # As urllib sends it; the log keeps the name as it arrived.
-        "headers": {"X-Api-Key": "placeholder"},
+        # As urllib sends them; the log keeps the names as they arrived.
+        "headers": {"X-Api-Key": "placeholder", "Host": url.removeprefix("http://")},
         "tool_results": [],
     }
+
+
+def test_a_paused_turn_sends_each_event_after_its_pause(tmp_path: Path) -> None:
+    script = [{"text": "slow", "pause": 0.2}]
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), handler(script, tmp_path / "log.jsonl")
+    )
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.server_address[1]}/v1/messages",
+        data=json.dumps({"messages": []}).encode(),
+        method="POST",
+    )
+    arrived = []
+    try:
+        with urllib.request.urlopen(request) as response:
+            for line in response:
+                if line.startswith(b"event: "):
+                    arrived.append(time.monotonic())
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert len(arrived) == 6
+    gaps = [later - earlier for earlier, later in itertools.pairwise(arrived)]
+    assert min(gaps) >= 0.15
 
 
 def test_token_counts_get_a_fixed_answer(api: tuple[str, Path]) -> None:

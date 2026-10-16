@@ -1,0 +1,72 @@
+# The credential proxy, claude-proxy in compose.yaml (KTD22): Caddy holds the
+# Claude credential, so no agent session ever does. Each session sends a fixed
+# placeholder in its place; Caddy drops it and sets the credential.
+#
+# It forwards only the Messages API's two calls, and refuses the betas that
+# would make the API itself fetch from an address a request names. It expands
+# no value a request carries, only its own environment, which keeps
+# placeholder-injection leaks such as GHSA-wwhq-w58m-w29c out. Its log holds
+# no header and no body.
+#
+# CORVO_AGENT_CREDENTIAL_KIND picks the header: api_key or oauth_token. Any
+# other value names no snippet below, and Caddy refuses to start.
+{
+	admin off
+	log default {
+		output stderr
+		format filter {
+			wrap json
+			request>headers delete
+			resp_headers delete
+		}
+	}
+	servers {
+		timeouts {
+			# Between two requests on a connection: above the engine's
+			# 300-second watchdogs. A response itself has no time limit.
+			idle 10m
+		}
+	}
+}
+
+# Setting a header replaces every value a request gave it. Caddy deletes
+# after it sets, so each kind deletes only the other kind's header.
+(api_key) {
+	header_up x-api-key {env.CORVO_AGENT_CREDENTIAL}
+	header_up -Authorization
+}
+
+(oauth_token) {
+	header_up Authorization "Bearer {env.CORVO_AGENT_CREDENTIAL}"
+	header_up -x-api-key
+}
+
+:8080 {
+	# The path exactly as sent: the path matcher would clean it, of dot
+	# segments, doubled slashes and case, while reverse_proxy forwards it as
+	# sent, which the API may resolve to another endpoint.
+	@messages {
+		method POST
+		expression `{path} in ["/v1/messages", "/v1/messages/count_tokens"]`
+	}
+
+	handle @messages {
+		# mcp-client and web-fetch make the API connect where a request says.
+		# Web search needs no beta: the Console organization turns it off.
+		@fetching header_regexp anthropic-beta (?i)(mcp-client|web-fetch)
+		respond @fetching 403
+
+		request_body {
+			max_size 32MiB
+		}
+
+		reverse_proxy {$CORVO_AGENT_UPSTREAM:https://api.anthropic.com} {
+			header_up Host {upstream_hostport}
+			import {$CORVO_AGENT_CREDENTIAL_KIND}
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}

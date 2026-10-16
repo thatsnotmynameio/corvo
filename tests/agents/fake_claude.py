@@ -18,7 +18,10 @@ The prompt picks the scenario:
 - fake:hog, memory taken until the process is killed, or exit 1 once it
   holds HOG_BYTES, past any session's memory limit;
 - fake:call <server> <tool> <JSON arguments>, a call to that SDK MCP tool
-  before the success result, whose result text is the tool's.
+  before the success result, whose result text is the tool's;
+- fake:api, one Messages API call to ANTHROPIC_BASE_URL before the success
+  result, with the credential its environment holds, sent as the real
+  engine sends it.
 
 It prints to stderr, as one JSON line, its arguments, the isolation
 variables, the name of every variable it saw, the processes its /proc lists
@@ -30,6 +33,7 @@ import json
 import os
 import sys
 import time
+import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -145,6 +149,34 @@ def call_tool(
     return "".join(part.get("text", "") for part in called["result"]["content"])
 
 
+def call_api(prompt: str) -> str:
+    """One streamed Messages API call, and the status it got. An API key goes
+    in x-api-key, and an OAuth token as a bearer with the OAuth beta, as the
+    engine sends them."""
+    if "ANTHROPIC_API_KEY" in os.environ:
+        headers = {"x-api-key": os.environ["ANTHROPIC_API_KEY"]}
+    else:
+        headers = {
+            "authorization": f"Bearer {os.environ['CLAUDE_CODE_OAUTH_TOKEN']}",
+            "anthropic-beta": "oauth-2025-04-20",
+        }
+    body = {
+        "model": "claude-haiku-5-5",
+        "max_tokens": 16,
+        "stream": True,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    request = urllib.request.Request(
+        f"{os.environ['ANTHROPIC_BASE_URL']}/v1/messages",
+        data=json.dumps(body).encode(),
+        headers={"content-type": "application/json", **headers},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        response.read()
+        return str(response.status)
+
+
 def processes() -> list[dict[str, Any]]:
     """Each process /proc lists, by PID and command name."""
     listed = []
@@ -217,6 +249,8 @@ def main() -> int:
         line = prompt.split("fake:call ", 1)[1].splitlines()[0]
         server, tool, arguments = line.split(" ", 2)
         text = call_tool(incoming, server, tool, json.loads(arguments))
+    if "fake:api" in prompt:
+        text = call_api(prompt)
     schema = json.loads(option("--json-schema") or "{}")
     frame = result("success", is_error=False, result=text)
     if schema.get("title") in CANNED:
