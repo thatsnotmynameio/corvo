@@ -9,6 +9,7 @@ import asyncio
 import json
 import os
 import threading
+from dataclasses import replace
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -24,9 +25,12 @@ from claude_agent_sdk import (
     tool,
 )
 
+from corvo.agents.dir_summary import agent as dir_summary
+from corvo.agents.dir_summary.models import DirSummaryInput, DirSummaryOutput
 from corvo.agents.session import sandbox_settings
 from corvo.agents.tone.models import ToneVerdict
 
+from .scripted import session
 from .scripted_api import handler
 
 FAKE = Path(__file__).with_name("fake_claude.py")
@@ -190,3 +194,19 @@ async def test_a_hanging_session_ends_at_the_caller_s_timeout() -> None:
                 prompt="fake:hang", options=ClaudeAgentOptions(cli_path=FAKE)
             ):
                 pass
+
+
+@pytest.mark.fake_cli
+async def test_dir_summary_s_tool_is_called_through_the_sdk(tmp_path: Path) -> None:
+    for name in ("b.md", "a.txt"):
+        (tmp_path / name).write_text("Some notes.\n")
+    given = replace(session(), cli_path=FAKE, cwd=tmp_path)
+
+    async with asyncio.timeout(TIMEOUT):
+        output, _ = await dir_summary.run(DirSummaryInput(), given)
+
+    # The fake's summary of the directory, and its words as count_words
+    # counted them in this process.
+    assert output == DirSummaryOutput(
+        summary="2 files, writable: a.txt, b.md", word_count=5
+    )

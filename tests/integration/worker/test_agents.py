@@ -1,4 +1,4 @@
-"""tone end to end: on the real Hatchet, in the agent worker's compose
+"""tone and dir-summary end to end: on the real Hatchet, in the agent worker's compose
 service, in real bubblewrap and cgroups, with the fake claude CLI as its
 sessions' engine (U9, R24).
 
@@ -8,19 +8,23 @@ The tests that stop the agent worker come last, and each starts it again.
 import asyncio
 import json
 import re
+from pathlib import Path
 
 import pytest
 from hatchet_sdk import Hatchet, V1TaskStatus
 from hatchet_sdk.clients.admin import TaskRunDetail
 from hatchet_sdk.clients.rest.exceptions import NotFoundException
 
+from corvo.agents.dir_summary.models import DirSummaryOutput
 from corvo.agents.tone.models import ToneInput, ToneOutput
+from corvo.worker.agent_calls import DirSummaryTaskInput
 from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
 
 from .conftest import (
     NO_SECCOMP,
     TEST_CREDENTIAL,
     AgentWorker,
+    dir_summary_stub,
     finished_tasks,
     tone_stub,
 )
@@ -95,6 +99,26 @@ async def test_tone_reaches_the_api_through_the_proxy_with_its_credential(
     assert headers["x-api-key"] == TEST_CREDENTIAL
     assert "authorization" not in headers
     assert PLACEHOLDER not in json.dumps(requests)
+
+
+async def test_dir_summary_counts_its_words_in_the_worker(
+    agent_worker: AgentWorker, hatchet: Hatchet, workdir: Path
+) -> None:
+    for name in ("notes.md", "plan.txt"):
+        (workdir / name).write_text("A small file.\n")
+        (workdir / name).chmod(0o644)
+
+    async with asyncio.timeout(60):
+        output = await dir_summary_stub(hatchet).aio_run(
+            DirSummaryTaskInput(workdir=workdir.name)
+        )
+
+    # The fake's summary, made in the sandbox, which sees the directory
+    # read-only, and its words as count_words counted them in the worker.
+    assert output == DirSummaryOutput(
+        summary="2 files, read-only: notes.md, plan.txt", word_count=5
+    )
+    assert agent_worker.run_cgroups() == []
 
 
 async def test_tone_at_its_turn_limit_fails_without_a_retry(
