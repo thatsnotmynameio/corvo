@@ -11,9 +11,10 @@ runs an agent itself.
    wrapper as cli_path, the wrapper's per-run variables and the credential's
    placeholder as env, and the SDK's sandbox.
 3. It starts the agent's run as a child task and waits for it, bounded by
-   the session budget. The wait forwards neither a cancel nor the deadline
-   into the child: a cancel would start the SDK's transport close, which can
-   take 15 seconds, and the kill comes first.
+   the session budget, and ends the wait once the worker is stopping. The
+   wait forwards neither a cancel nor the deadline into the child: a cancel
+   would start the SDK's transport close, which can take 15 seconds, and
+   the kill comes first.
 4. However the session ended, result, failure, budget, Hatchet's timeout or
    cancel, it kills the cgroup before anything else. Then it cancels the
    child, which lets the SDK close its transport, waits until the child is
@@ -241,8 +242,15 @@ async def run_agent[I: BaseModel, O: BaseModel](
     )
     child = asyncio.create_task(run(input, session))
     cancelled = False
+    ends = time.monotonic() + session_budget(time.monotonic() - started)
     try:
-        await asyncio.wait({child}, timeout=session_budget(time.monotonic() - started))
+        # In slices, so a SIGTERM hook whose kill came before the wrapper
+        # joined the cgroup still ends the session within one.
+        while not child.done() and refusal is None:
+            left = ends - time.monotonic()
+            if left <= 0:
+                break
+            await asyncio.wait({child}, timeout=min(left, POLL_INTERVAL))
     except asyncio.CancelledError:
         cancelled = True
         raise

@@ -239,6 +239,26 @@ async def test_a_session_the_stop_kills_fails_as_worker_stopping(tree: Tree) -> 
     )
 
 
+async def test_a_stop_the_hook_s_kill_missed_still_ends_the_session(
+    tree: Tree,
+) -> None:
+    # The hook ran after the refusal check, while the cgroup was still empty,
+    # so its one kill missed the wrapper that joined after it.
+    agent = Agent(tree=tree)
+
+    def stop_then_run_on(session: Session) -> object:
+        sessions.refusal = "worker stopping"
+        return agent.hang()
+
+    agent.act = stop_then_run_on
+
+    async with asyncio.timeout(2):
+        with pytest.raises(AgentFailed, match="^agent tone failed: worker stopping$"):
+            await run(agent)
+
+    assert tree.events == ["create", "kill", "kill", "agent cleanup", "remove"]
+
+
 async def test_a_failed_session_fails_the_run_with_its_report(tree: Tree) -> None:
     ctx = FakeContext()
     report = RunReport(
