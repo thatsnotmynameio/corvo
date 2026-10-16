@@ -84,7 +84,7 @@ An agent that works in a directory names it relative to `<CORVO_AGENT_ROOT>/work
 - Keep credentials out of it, such as a token in `.git/config`: the session reads everything there.
 - The session sees it read-only, unless the agent declares that it writes to it.
 - A `CLAUDE.md`, a `.claude/` directory or skills in it are files like any other: sessions load no settings, memory or skills from it.
-- The volume holds no `workdirs` until a caller creates it. `dir-summary` is the example agent that works in one.
+- The volume holds no `workdirs` until a caller creates it. `dir-summary` is the example agent that works in one, and `dir-review` the example workflow that hands it one.
 
 ## Custom tools
 
@@ -169,3 +169,24 @@ The same steps, with a working directory the session must summarize. Its files t
    - AE6: the summary does not end with `PINEAPPLE`. It may describe `CLAUDE.md` as one of the files;
    - tool denial: the summary does not hold the host name that `docker compose exec agent-worker cat /etc/hostname` prints. This shows the read did not succeed, not that the session tried it: say whether the summary mentions the request, or a denied read.
 4. Delete the directory: `docker compose exec -u root agent-worker rm -rf /var/lib/corvo/agents/workdirs/proof`.
+
+### `dir-review`, a workflow on both workers
+
+The workflow runs on the main worker and spawns `dir-summary`, then `tone` on its summary, on the agent worker.
+
+1. Before step 5, create the directory as `dir-summary`'s step 1 does.
+2. In step 5, trigger `dir-review` instead:
+
+   ```
+   docker compose exec worker python -c '
+   from corvo.worker.workflows.dir_review import DirReviewInput, dir_review
+   print(dir_review.run(DirReviewInput(workdir="proof")))
+   '
+   ```
+
+3. Record, besides step 6's list:
+   - the output: `summarize`'s summary and word count, and `judge`'s review, which names the summary's tone and its word count;
+   - both report lines: `docker compose logs agent-worker | grep -E 'agent (dir-summary|tone):'`;
+   - the peak process count of each child run: the two run one after the other, so step 4 prints two series;
+   - in the dashboard, that `dir-review` ran on `corvo-worker` and both children on `corvo-agent-worker`.
+4. Delete the directory as `dir-summary`'s step 4 does.

@@ -1,6 +1,7 @@
-"""tone and dir-summary end to end: on the real Hatchet, in the agent
-worker's compose service, in real bubblewrap and cgroups, with the fake
-claude CLI as its sessions' engine (U9, R24).
+"""tone, dir-summary and dir-review end to end: on the real Hatchet, in the
+agent worker's compose service, in real bubblewrap and cgroups, with the
+fake claude CLI as its sessions' engine (U9, R24). dir-review runs on
+corvo-worker, which spawns both agents on the agent worker.
 
 The tests that stop the agent worker come last, and each starts it again.
 """
@@ -8,6 +9,7 @@ The tests that stop the agent worker come last, and each starts it again.
 import asyncio
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -19,6 +21,7 @@ from corvo.agents.dir_summary.models import DirSummaryOutput
 from corvo.agents.tone.models import ToneInput, ToneOutput
 from corvo.worker.agent_calls import DirSummaryTaskInput
 from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
+from corvo.worker.workflows.dir_review import DirReviewInput, DirReviewOutput
 
 from .conftest import (
     NO_SECCOMP,
@@ -62,6 +65,18 @@ async def run_log(hatchet: Hatchet, task_run_id: str, pattern: str) -> list[str]
         if any(re.search(pattern, line) for line in lines):
             return lines
         await asyncio.sleep(1)
+
+
+async def served(hatchet: Hatchet, worker: str, since: datetime) -> set[str]:
+    """The workflows whose tasks the workers of that name ran since then."""
+    names: set[str] = set()
+    for each in (await hatchet.workers.aio_list()).rows or []:
+        if each.name == worker:
+            listed = await hatchet.runs.aio_list(
+                since=since, worker_id=each.metadata.id, only_tasks=True
+            )
+            names |= {row.workflow_name or "" for row in listed.rows}
+    return names
 
 
 async def ended(worker: AgentWorker) -> None:
@@ -118,6 +133,32 @@ async def test_dir_summary_counts_its_words_in_the_worker(
     assert output == DirSummaryOutput(
         summary="2 files, read-only: notes.md, plan.txt", word_count=5
     )
+    assert agent_worker.run_cgroups() == []
+
+
+@pytest.mark.usefixtures("worker")
+async def test_dir_review_reviews_with_both_agents_outputs(
+    agent_worker: AgentWorker, hatchet: Hatchet, workdir: Path
+) -> None:
+    for name in ("notes.md", "plan.txt"):
+        (workdir / name).write_text("A small file.\n")
+        (workdir / name).chmod(0o644)
+    dir_review = hatchet.stubs.workflow(
+        name="dir-review", input_validator=DirReviewInput
+    )
+    since = datetime.now(UTC)
+
+    async with asyncio.timeout(120):
+        result = await dir_review.aio_run(DirReviewInput(workdir=workdir.name))
+        main = await served(hatchet, "corvo-worker", since)
+        agents = await served(hatchet, "corvo-agent-worker", since)
+
+    # The fake tone's verdict, on the fake dir-summary's count of 5 words.
+    assert DirReviewOutput.model_validate(result["judge"]) == DirReviewOutput(
+        review="A friendly summary, 5 words long."
+    )
+    assert main == {"dir-review"}
+    assert agents == {"dir-summary", "tone"}
     assert agent_worker.run_cgroups() == []
 
 

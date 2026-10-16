@@ -20,8 +20,10 @@ from typing import Any
 
 import pytest
 from hatchet_sdk import ClientConfig, Context, EmptyModel, Hatchet
-from hatchet_sdk.runnables.workflow import BaseWorkflow
+from hatchet_sdk.runnables.workflow import BaseWorkflow, Standalone
+from pydantic import BaseModel
 
+import corvo.worker.agent_calls
 import corvo.worker.agents
 import corvo.worker.tasks
 import corvo.worker.workflows
@@ -76,8 +78,32 @@ def definitions(modules: Iterable[ModuleType]) -> list[Definition]:
 def problems(
     defined: Mapping[str, Sequence[Definition]],
     registered: Mapping[str, list[BaseWorkflow[Any]]],
+    stubs: Sequence[Definition] = (),
 ) -> list[str]:
-    """Each profile's definitions checked against each profile's list."""
+    """Each profile's definitions checked against each profile's list.
+
+    A stub, which a workflow imports to spawn its task, is no definition of
+    an area, and it shares its task's name by design. A stub on a list would
+    take its task's runs and raise.
+    """
+    stub_labels = {id(workflow): label for label, workflow in stubs}
+    on_lists = [
+        f"{stub_labels[id(workflow)]} ({workflow.name}) is a stub, on the "
+        f"{profile} profile: a worker serving it would take its task's runs "
+        "and raise"
+        for profile, workflows in sorted(registered.items())
+        for workflow in workflows
+        if id(workflow) in stub_labels
+    ]
+    defined = {
+        profile: [found for found in each if id(found[1]) not in stub_labels]
+        for profile, each in defined.items()
+    }
+    registered = {
+        profile: [workflow for workflow in workflows if id(workflow) not in stub_labels]
+        for profile, workflows in registered.items()
+    }
+
     labels = {
         id(workflow): label for found in defined.values() for label, workflow in found
     }
@@ -134,7 +160,39 @@ def problems(
             for name, names in sharing.items()
             if len(names) > 1
         ),
+        *on_lists,
     ]
+
+
+def stub_problems(
+    stubs: Sequence[Definition], tasks: Sequence[Definition]
+) -> list[str]:
+    """Each stub checked against the agent task of its name: a stub's input
+    and output classes are its task's, so caller and task validate alike."""
+    by_name = {
+        workflow.name: workflow
+        for _, workflow in tasks
+        if isinstance(workflow, Standalone)
+    }
+    found = []
+    for label, stub in stubs:
+        assert isinstance(stub, Standalone)
+        named = f"{label} ({stub.name})"
+        task = by_name.get(stub.name)
+        if task is None:
+            found.append(f"{named} is a stub of no agent task")
+            continue
+        if stub.input_validator_type is not task.input_validator_type:
+            found.append(
+                f"{named} takes {stub.input_validator_type.__name__}, but its "
+                f"task takes {task.input_validator_type.__name__}"
+            )
+        if stub.output_validator_type is not task.output_validator_type:
+            found.append(
+                f"{named} returns {stub.output_validator_type.__name__}, but its "
+                f"task returns {task.output_validator_type.__name__}"
+            )
+    return found
 
 
 def profile_lists() -> dict[str, list[BaseWorkflow[Any]]]:
@@ -186,6 +244,39 @@ async def namespaced_job(input: EmptyModel, ctx: Context) -> None: ...
 async def prefixed_job(input: EmptyModel, ctx: Context) -> None: ...
 
 
+class AgentInput(BaseModel):
+    text: str
+
+
+class OtherInput(BaseModel):
+    words: int
+
+
+class AgentOutput(BaseModel):
+    text: str
+
+
+class OtherOutput(BaseModel):
+    words: int
+
+
+@hatchet.task(name="registration-agent", input_validator=AgentInput)
+async def agent_task(input: AgentInput, ctx: Context) -> AgentOutput:
+    return AgentOutput(text=input.text)
+
+
+stub = hatchet.stubs.task(
+    name="registration-agent", input_validator=AgentInput, output_validator=AgentOutput
+)
+other_input_stub = hatchet.stubs.task(
+    name="registration-agent", input_validator=OtherInput, output_validator=AgentOutput
+)
+other_output_stub = hatchet.stubs.task(
+    name="registration-agent", input_validator=AgentInput, output_validator=OtherOutput
+)
+STUB = ("calls.agent", stub)
+
+
 def test_every_definition_in_the_areas_is_on_its_profile() -> None:
     roots = [
         Path(path)
@@ -196,8 +287,13 @@ def test_every_definition_in_the_areas_is_on_its_profile() -> None:
     defined = {
         profile: definitions(area_modules(areas)) for profile, areas in AREAS.items()
     }
+    stubs = definitions([corvo.worker.agent_calls])
 
-    found = unpackaged(roots) + problems(defined, profile_lists())
+    found = (
+        unpackaged(roots)
+        + problems(defined, profile_lists(), stubs)
+        + stub_problems(stubs, defined["agents"])
+    )
 
     assert found == []
 
@@ -333,3 +429,57 @@ def test_a_package_that_fails_to_import_fails_the_walk(
 
     with pytest.raises(ModuleNotFoundError, match="nowhere_to_be_found"):
         area_modules([importlib.import_module("registration_area")])
+
+
+def test_a_stub_imported_into_an_area_is_not_a_definition_of_its_own() -> None:
+    defined = definitions(
+        [module("area.agent", agent=agent_task), module("area.flow", agent=stub)]
+    )
+
+    found = problems(
+        {"agents": defined}, {"agents": [agent_task], "main": []}, stubs=[STUB]
+    )
+
+    assert found == []
+
+
+def test_a_stub_on_a_profile_is_named() -> None:
+    for profile in ("agents", "main"):
+        found = problems({}, {profile: [stub]}, stubs=[STUB])
+
+        assert found == [
+            f"calls.agent (registration-agent) is a stub, on the {profile} "
+            "profile: a worker serving it would take its task's runs and raise"
+        ]
+
+
+def test_a_stub_matching_its_task_passes() -> None:
+    assert stub_problems([STUB], [("area.agent.agent", agent_task)]) == []
+
+
+def test_a_stub_of_no_agent_task_is_named() -> None:
+    found = stub_problems([STUB], [("area.example.example", example)])
+
+    assert found == ["calls.agent (registration-agent) is a stub of no agent task"]
+
+
+def test_a_stub_whose_input_differs_from_its_task_s_is_named() -> None:
+    found = stub_problems(
+        [("calls.agent", other_input_stub)], [("area.agent.agent", agent_task)]
+    )
+
+    assert found == [
+        "calls.agent (registration-agent) takes OtherInput, but its task takes "
+        "AgentInput"
+    ]
+
+
+def test_a_stub_whose_output_differs_from_its_task_s_is_named() -> None:
+    found = stub_problems(
+        [("calls.agent", other_output_stub)], [("area.agent.agent", agent_task)]
+    )
+
+    assert found == [
+        "calls.agent (registration-agent) returns OtherOutput, but its task "
+        "returns AgentOutput"
+    ]
