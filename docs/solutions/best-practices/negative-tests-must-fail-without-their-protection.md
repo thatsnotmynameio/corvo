@@ -69,8 +69,11 @@ After, the test first proves that the log holds the request, then that no header
 ```python
 status, _ = unreachable.send("POST", "/v1/messages", QUICK, credentials)
 assert status == 502
-errors = [json.loads(line) for line in unreachable.logs().splitlines()
-          if '"http.log.error"' in line]
+errors = [
+    json.loads(line)
+    for line in unreachable.logs().splitlines()
+    if '"http.log.error"' in line
+]
 assert [error["request"]["uri"] for error in errors] == ["/v1/messages"]
 for secret in (TEST_CREDENTIAL, PLACEHOLDER, "x-api-key", "authorization"):
     assert secret not in unreachable.logs().lower()
