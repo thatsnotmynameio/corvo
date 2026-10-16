@@ -25,6 +25,11 @@ def test_a_frozen_dict_equals_its_dict_and_hashes() -> None:
     frozen = FrozenDict({"a": "b"})
 
     assert frozen == {"a": "b"}
+    assert frozen == FrozenDict({"a": "b"})
+    assert frozen != {"a": "c"}
+    assert frozen != [("a", "b")]
+    assert "a" in frozen
+    assert "b" not in frozen
     assert list(frozen) == ["a"]
     assert len(frozen) == 1
     assert hash(frozen) == hash(FrozenDict({"a": "b"}))
@@ -64,7 +69,7 @@ def test_a_nested_payload_freezes_at_every_depth_and_thaws_back() -> None:
     [[1, 2], {"a": math.nan}, {"a": [{"b": math.inf}]}, {"a": -math.inf}],
     ids=["a list", "NaN", "nested infinity", "minus infinity"],
 )
-def test_a_payload_that_is_not_a_json_object_fails(payload: object) -> None:
+def test_a_payload_that_is_not_a_finite_json_object_fails(payload: object) -> None:
     # Covers AE8.
     with pytest.raises(ValidationError):
         Holder(payload=payload)

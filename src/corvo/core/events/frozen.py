@@ -51,6 +51,19 @@ class FrozenDict[K, V](Mapping[K, V]):
     def __len__(self) -> int:
         return len(self._data)
 
+    # Mapping's own versions copy both sides, or catch a KeyError on a miss.
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, FrozenDict):
+            return self._data == other._data
+        if isinstance(other, Mapping):
+            return self._data == dict(other.items())
+        return NotImplemented
+
+    @override
+    def __contains__(self, key: object) -> bool:
+        return key in self._data
+
     @override
     def __hash__(self) -> int:
         if self._hash is None:
@@ -94,10 +107,6 @@ def thaw(value: object) -> object:
     return value
 
 
-def _freeze_object(value: dict[str, JsonValue]) -> FrozenDict[str, JsonRead]:
-    return FrozenDict({key: freeze(item) for key, item in value.items()})
-
-
 def _payload_schema(
     _source: object, handler: Callable[[Any], core_schema.CoreSchema]
 ) -> core_schema.CoreSchema:
@@ -106,7 +115,7 @@ def _payload_schema(
     plain = handler(dict[str, JsonValue])
     return core_schema.no_info_before_validator_function(
         thaw,
-        core_schema.no_info_after_validator_function(_freeze_object, plain),
+        core_schema.no_info_after_validator_function(freeze, plain),
         serialization=core_schema.plain_serializer_function_ser_schema(
             thaw, return_schema=plain
         ),
@@ -123,12 +132,8 @@ type LabelKey = Annotated[
 type LabelValue = Annotated[str, StringConstraints(min_length=1, strict=True)]
 
 
-def _plain_labels(labels: Mapping[str, str]) -> dict[str, str]:
-    return dict(labels)
-
-
 type Labels = Annotated[
     Mapping[LabelKey, LabelValue],
     AfterValidator(FrozenDict),
-    PlainSerializer(_plain_labels, return_type=dict[str, str]),
+    PlainSerializer(dict, return_type=dict[str, str]),
 ]

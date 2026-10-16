@@ -65,7 +65,7 @@ def test_a_snapshot_path_outside_the_alphabet_fails() -> None:
         CategorySnapshot(id=BILLING.id, path=("billing", "in voices"))
 
 
-def test_assigning_to_a_category_field_fails() -> None:
+def test_assigning_to_a_category_fails() -> None:
     with pytest.raises(ValidationError):
         INVOICES.name = "bills"  # type: ignore[misc]
     assert INVOICES.name == "invoices"
