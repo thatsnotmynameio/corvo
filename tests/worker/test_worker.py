@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 import signal
 from collections.abc import Iterator
 from types import FrameType
@@ -51,6 +52,43 @@ def fresh_settings() -> Iterator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def root_level() -> Iterator[logging.Logger]:
+    # main() sets the root logger's level; put it back, so a DEBUG root
+    # does not reach later tests.
+    root = logging.getLogger()
+    level = root.level
+    root.setLevel(logging.WARNING)
+    yield root
+    root.setLevel(level)
+
+
+@pytest.mark.parametrize(
+    ("variable", "level"),
+    [("DEBUG", logging.DEBUG), (None, logging.INFO)],
+    ids=["its variable's", "info by default"],
+)
+def test_main_sets_the_root_level_before_the_worker_starts(
+    events: list[tuple[str, dict[str, Any]]],
+    monkeypatch: pytest.MonkeyPatch,
+    root_level: logging.Logger,
+    variable: str | None,
+    level: int,
+) -> None:
+    monkeypatch.delenv("CORVO_WORKER_PROFILE", raising=False)
+    if variable is None:
+        monkeypatch.delenv("CORVO_LOG_LEVEL", raising=False)
+    else:
+        monkeypatch.setenv("CORVO_LOG_LEVEL", variable)
+    seen: list[int] = []
+    monkeypatch.setattr(Worker, "start", lambda self: seen.append(root_level.level))
+    assert root_level.level != level
+
+    main()
+
+    assert seen == [level]
 
 
 def test_main_serves_the_main_profile_by_default(

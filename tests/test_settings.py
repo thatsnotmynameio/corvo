@@ -60,3 +60,22 @@ def test_the_worker_profile_reads_its_variable(
     monkeypatch.setenv("CORVO_WORKER_PROFILE", "agents")
 
     assert Settings().worker_profile == "agents"
+
+
+def test_the_log_level_defaults_to_info() -> None:
+    assert Settings().log_level == "INFO"
+
+
+def test_the_log_level_reads_its_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORVO_LOG_LEVEL", "DEBUG")
+
+    assert Settings().log_level == "DEBUG"
+
+
+def test_the_log_level_rejects_an_unknown_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CORVO_LOG_LEVEL", "TRACE")
+
+    with pytest.raises(ValidationError, match="log_level"):
+        Settings()
