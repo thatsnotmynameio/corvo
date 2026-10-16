@@ -82,9 +82,11 @@ class Proxy:
         return response.status, self.entries()[seen:]
 
     def entries(self) -> list[dict[str, Any]]:
-        if not self.log.exists():
+        try:
+            text = self.log.read_text()
+        except FileNotFoundError:
             return []
-        return [json.loads(line) for line in self.log.read_text().splitlines()]
+        return [json.loads(line) for line in text.splitlines()]
 
     def logs(self) -> str:
         ran = subprocess.run(
@@ -92,6 +94,7 @@ class Proxy:
             capture_output=True,
             text=True,
             check=True,
+            timeout=60,
         )
         return ran.stdout + ran.stderr
 
@@ -163,6 +166,7 @@ def proxies() -> Iterator[dict[str, Proxy]]:
             "/data/log.jsonl",
         )
         containers.append(upstream)
+        image = proxy_image()
         found = {}
         for kind in ("api_key", "oauth_token"):
             name = f"corvo-proxy-{kind}-{run}"
@@ -183,7 +187,7 @@ def proxies() -> Iterator[dict[str, Proxy]]:
                 f"CORVO_AGENT_UPSTREAM=http://{upstream}:8080",
                 "--volume",
                 f"{CADDYFILE}:/etc/caddy/Caddyfile:ro",
-                proxy_image(),
+                image,
             )
             containers.append(name)
             port = int(docker("port", name, "8080/tcp").rsplit(":", 1)[1])

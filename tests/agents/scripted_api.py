@@ -163,8 +163,10 @@ def handler(script: list[dict[str, Any]], log: Path) -> type[BaseHTTPRequestHand
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")
             self.end_headers()
+            pause = float(turn.get("pause", 0))
             for name, data in events(blocks, stop):
-                time.sleep(float(turn.get("pause", 0)))
+                if pause:
+                    time.sleep(pause)
                 self.wfile.write(
                     f"event: {name}\ndata: {json.dumps(data)}\n\n".encode()
                 )
