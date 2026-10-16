@@ -129,11 +129,7 @@ def check_delegation(mountinfo: str, root: Path) -> None:
         raise Disabled(DELEGATION, "no cgroup2 mount")
     if not all("nsdelegate" in mount for mount in options):
         raise Disabled(DELEGATION, "the cgroup2 mount lacks nsdelegate")
-    cgroup = make_cgroup(root)
-    try:
-        cgroup.remove()
-    except OSError as error:
-        raise Disabled(DELEGATION, f"cannot remove a run's cgroup: {error}") from None
+    make_cgroup(root).remove()
 
 
 def make_cgroup(root: Path) -> Cgroup:
@@ -196,8 +192,6 @@ async def sandbox_report(
         report: dict[str, Any] = json.loads(stdout)
     except ValueError:
         raise Disabled(BUBBLEWRAP, "the check printed no report") from None
-    if not isinstance(report, dict):
-        raise Disabled(BUBBLEWRAP, "the check printed no report")
     return report
 
 

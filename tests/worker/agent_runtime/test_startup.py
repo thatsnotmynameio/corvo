@@ -51,12 +51,14 @@ class Wrapper:
         self.path = directory / "corvo-agent-sandbox"
         self.path.write_text(
             f"#!{sys.executable}\n"
-            "import json, os, sys\n"
+            "import json, os, sys, time\n"
             "from pathlib import Path\n"
             "here = Path(__file__).parent\n"
-            "(here / 'call.json').write_text(\n"
-            "    json.dumps({'argv': sys.argv[1:], 'env': dict(os.environ)}))\n"
+            "call = {'argv': sys.argv[1:], 'env': dict(os.environ),\n"
+            "        'pid': os.getpid()}\n"
+            "(here / 'call.json').write_text(json.dumps(call))\n"
             "reply = json.loads((here / 'reply.json').read_text())\n"
+            "time.sleep(reply['sleep'])\n"
             "sys.stdout.write(reply['stdout'])\n"
             "sys.stderr.write(reply['stderr'])\n"
             "sys.exit(reply['code'])\n"
@@ -64,11 +66,12 @@ class Wrapper:
         self.path.chmod(0o755)
         self.reply(ISOLATED)
 
-    def reply(self, report: object, code: int = 0, stderr: str = "") -> None:
+    def reply(
+        self, report: object, code: int = 0, stderr: str = "", sleep: float = 0
+    ) -> None:
         stdout = report if isinstance(report, str) else json.dumps(report)
-        (self.path.parent / "reply.json").write_text(
-            json.dumps({"stdout": stdout, "stderr": stderr, "code": code})
-        )
+        reply = {"stdout": stdout, "stderr": stderr, "code": code, "sleep": sleep}
+        (self.path.parent / "reply.json").write_text(json.dumps(reply))
 
     @property
     def call(self) -> dict[str, Any]:
@@ -188,14 +191,21 @@ async def test_a_credential_in_the_environment_is_refused(
     assert tree.events == []
 
 
-async def test_a_cgroup_mount_without_nsdelegate_is_refused(
-    settings: Settings, mountinfo: Path, tree: Tree
+@pytest.mark.parametrize(
+    ("mounts", "reason"),
+    [
+        (NOT_DELEGATING, "the cgroup2 mount lacks nsdelegate"),
+        ("", "no cgroup2 mount"),
+    ],
+)
+async def test_a_cgroup_mount_that_does_not_delegate_is_refused(
+    settings: Settings, mountinfo: Path, tree: Tree, mounts: str, reason: str
 ) -> None:
-    mountinfo.write_text(NOT_DELEGATING)
+    mountinfo.write_text(mounts)
 
     refused = await refusal(settings)
 
-    assert refused == "cgroup delegation: the cgroup2 mount lacks nsdelegate"
+    assert refused == f"cgroup delegation: {reason}"
     assert tree.events == []
 
 
@@ -252,6 +262,25 @@ async def test_a_sandbox_that_does_not_isolate_is_refused(
     assert await refusal(settings) == f"bubblewrap: {reason}"
 
 
+async def test_a_check_past_the_bound_is_killed_and_refused(
+    settings: Settings,
+    wrapper: Wrapper,
+    tree: Tree,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(startup, "PREPARE_TIMEOUT", 1)
+    wrapper.reply(ISOLATED, sleep=60)
+
+    refused = await refusal(settings)
+
+    assert refused == "bubblewrap: not done within 1 seconds"
+    assert tree.events[-2:] == ["kill", "remove"]
+    stat = Path(f"/proc/{wrapper.call['pid']}/stat")
+    async with asyncio.timeout(5):
+        while stat.exists() and stat.read_text().split()[2] != "Z":
+            await asyncio.sleep(0.1)
+
+
 @pytest.mark.parametrize(
     ("change", "reason"),
     [
@@ -268,6 +297,14 @@ async def test_a_sandbox_the_sdk_cannot_nest_in_is_refused(
     wrapper.reply(ISOLATED | change)
 
     assert await refusal(settings) == f"the SDK's sandbox: {reason}"
+
+
+async def test_a_proxy_address_without_a_host_is_refused(settings: Settings) -> None:
+    refused = await refusal(
+        settings.model_copy(update={"agent_proxy_url": "claude-proxy:8080"})
+    )
+
+    assert refused == "proxy: 'claude-proxy:8080' names no host"
 
 
 async def test_a_proxy_that_starts_later_is_retried(
@@ -342,6 +379,30 @@ def test_the_start_sweeps_the_cgroups_sessions_left(
 
 
 @pytest.mark.usefixtures("no_credential")
+def test_a_leftover_the_sweep_cannot_remove_stays(
+    settings: Settings,
+    leftovers: list[Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    # Without its cgroup.events, as no cgroup is.
+    broken = leftovers[0].parent / "run-broken"
+    broken.mkdir()
+    monkeypatch.setattr(startup, "get_settings", lambda: settings)
+
+    startup.before_start()
+
+    assert broken.exists()
+    assert caplog.messages[-2].startswith(
+        "agents: run-broken is left: FileNotFoundError"
+    )
+    assert caplog.messages[-1] == (
+        "agents: swept 2 leftover cgroups: run-left-1, run-left-2"
+    )
+
+
+@pytest.mark.usefixtures("no_credential")
 def test_a_refused_start_logs_the_part_and_exits(
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
@@ -361,11 +422,12 @@ def test_a_refused_start_logs_the_part_and_exits(
 
 @pytest.fixture
 def in_flight(tree: Tree) -> Iterator[list[Path]]:
-    """Two sessions' cgroups in flight, and one that is not."""
+    """Two sessions' cgroups in flight, one that is not, and one in flight
+    that is gone."""
     paths = [tree.root / name for name in ("run-a", "run-b", "run-done")]
     for path in paths:
         path.mkdir()
-    sessions.in_flight.update(paths[:2])
+    sessions.in_flight.update([*paths[:2], tree.root / "run-gone"])
     yield paths
     sessions.in_flight.clear()
 
@@ -384,7 +446,11 @@ def test_the_sigterm_hook_refuses_runs_then_kills_the_in_flight_sessions(
 
     startup.on_sigterm()
 
-    assert sorted(kills) == [("run-a", "worker stopping"), ("run-b", "worker stopping")]
+    assert sorted(kills) == [
+        ("run-a", "worker stopping"),
+        ("run-b", "worker stopping"),
+        ("run-gone", "worker stopping"),
+    ]
     assert sessions.refusal == "worker stopping"
     first, second, done = in_flight
     assert (first / "cgroup.kill").read_text() == "1"
