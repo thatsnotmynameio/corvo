@@ -12,8 +12,10 @@ This module imports only Pydantic and the standard library.
 """
 
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Annotated, Any, Self
+from enum import Enum
+from typing import Annotated, Any, Final, Self
 from uuid import UUID
 
 from pydantic import (
@@ -26,8 +28,22 @@ from pydantic import (
     model_validator,
 )
 
-from corvo.core.events.categories import UNKNOWN, CategoryField
-from corvo.core.events.frozen import FrozenDict, Labels, Payload
+from corvo.core.events.categories import (
+    UNKNOWN,
+    Category,
+    CategoryField,
+    CategorySnapshot,
+)
+from corvo.core.events.frozen import FrozenDict, JsonRead, Labels, Payload
+
+
+class Inherit(Enum):
+    """The one value that asks a child for its parent's value."""
+
+    INHERIT = "inherit"
+
+
+INHERIT: Final = Inherit.INHERIT
 
 type Text = Annotated[str, StringConstraints(min_length=1, max_length=255)]
 
@@ -70,3 +86,36 @@ class Event(BaseModel):
         elif self.root_id == self.id:
             raise ValueError("an event with a parent needs its chain's root_id")
         return self
+
+    def child(
+        self,
+        *,
+        name: str,
+        source: str,
+        payload_version: int = 1,
+        payload: Mapping[str, JsonRead] | None = None,
+        occurred_at: datetime | None = None,
+        category: Category | CategorySnapshot | Inherit | None = None,
+        labels: Mapping[str, str] | Inherit | None = None,
+        subject: str | Inherit | None = None,
+    ) -> Event:
+        """The next event in this one's chain. Category, labels and subject
+        are the parent's only when given INHERIT; given nothing, the child
+        has none of them, and its category is unknown."""
+        given: dict[str, object] = {
+            "payload": payload,
+            "occurred_at": occurred_at,
+            "category": self.category if category is INHERIT else category,
+            "labels": self.labels if labels is INHERIT else labels,
+            "subject": self.subject if subject is INHERIT else subject,
+        }
+        # Through the constructor, so every validator runs again; what is
+        # not given takes the field's default.
+        return Event(
+            parent_id=self.id,
+            root_id=self.root_id,
+            name=name,
+            payload_version=payload_version,
+            source=source,
+            **{field: value for field, value in given.items() if value is not None},
+        )
