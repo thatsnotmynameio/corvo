@@ -157,9 +157,10 @@ async def test_a_worker_that_cannot_isolate_registers_nothing(
             ToneInput(text="Thanks for waiting!"), wait_for_result=False
         )
         # Until it has refused twice: it exits, and compose starts it again.
-        while agent_worker.logs().count("agents refused: bubblewrap") < 2:
-            await asyncio.sleep(1)
-        logs = agent_worker.logs()
+        logs = ""
+        while logs.count("agents refused: bubblewrap") < 2:
+            await asyncio.sleep(2)
+            logs = await asyncio.to_thread(agent_worker.logs)
         status = await hatchet.runs.aio_get_status(run.workflow_run_id)
 
         await asyncio.to_thread(agent_worker.up)
