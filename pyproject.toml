@@ -12,6 +12,7 @@ requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.0",
     "asyncpg>=0.32.0",
+    "claude-agent-sdk==0.2.167",
     "fastapi>=0.143.0",
     "hatchet-sdk>=1.42.1",
     "pydantic-settings>=2.15.0",
@@ -22,6 +23,14 @@ dependencies = [
 # The worker's entry point, as Hatchet's Python quickstart declares its own.
 [project.scripts]
 corvo-worker = "corvo.worker.worker:main"
+# The SDK's cli_path in the agent worker: it starts the engine in a bubblewrap
+# sandbox of its own.
+corvo-agent-sandbox = "corvo.worker.agent_runtime.sandbox:main"
+
+# corvo runs on Linux only: its image and CI. The lock resolves for Linux
+# alone, so it carries no package another platform alone needs.
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
