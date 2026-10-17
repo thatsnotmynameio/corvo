@@ -2,11 +2,11 @@
 published again as a corvo event.
 
 corvo.worker.event_gateway is where events cross into corvo. Its workflows
-and tasks follow the rules of corvo.worker.workflows and corvo.worker.tasks:
-the logic lives in corvo.core, at the mirrored path, and never imports
-Hatchet; each task is a thin shell that adapts Hatchet's event to the core
-and publishes what the core returns. Every definition here goes on the main
-profile's list in corvo.worker.profiles.main.
+and tasks follow docs/worker.md's rules: the logic lives in corvo.core, at
+the mirrored path, and never imports Hatchet; each task is a thin shell that
+adapts Hatchet's event to the core and publishes what the core returns.
+Every definition here goes on the main profile's list in
+corvo.worker.profiles.main.
 
 The workflow listens to EXTERNAL_PREFIXES, each as `prefix:*`. The engine
 matches that as an anchored SQL LIKE, so the parser never receives its own
