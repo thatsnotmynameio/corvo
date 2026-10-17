@@ -18,7 +18,7 @@ tags: [hatchet, retries, retry-count, heartbeat, idempotency, cancellation, work
 
 ## Context
 
-The agents skeleton (stack #31 to #46) runs paid Claude sessions as Hatchet tasks, so a second run of one is money nobody asked to spend. Declaring `retries=0` looked like enough: corvo's defaults say so for every non-idempotent task (`src/corvo/worker/defaults.py:47`, "a retry re-runs and re-pays the whole session"). While the plan was being researched, reading the engine and SDK at the versions corvo pins showed two behaviors that `retries=0` does not cover. The plan records them (`docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md`, Dependencies and KTD8), but they apply to any non-idempotent task in corvo, not only to agents.
+The agents skeleton (stack #31 to #46) runs paid Claude sessions as Hatchet tasks, so a second run of one is money nobody asked to spend. Declaring `retries=0` looked like enough: corvo's defaults say so for every non-idempotent task (`src/corvo/worker/defaults.py:27-28`, "a retry re-runs and re-pays the whole session"). While the plan was being researched, reading the engine and SDK at the versions corvo pins showed two behaviors that `retries=0` does not cover. The plan records them (`docs/plans/2026-10-15-0020-feat-agents-skeleton-plan.md`, Dependencies and KTD8), but they apply to any non-idempotent task in corvo, not only to agents.
 
 1. **The engine re-runs a task after a lost worker, whatever its `retries`.** Engine v0.110.5, the version `compose.yaml` pins, reassigns every task, unless it was evicted, on a worker whose last heartbeat is older than 30 seconds (`ListTasksToReassign` in hatchet-dev/hatchet v0.110.5, `pkg/repository/sqlcv1/tasks.sql`, upstream: `w."lastHeartbeatAt" < NOW() - INTERVAL '30 seconds'`). It counts that as an internal failure, up to `MaxInternalRetryCount`, which defaults to 10 (hatchet-dev/hatchet v0.110.5, `pkg/config/server/server.go`, upstream, overridable with `SERVER_MAX_INTERNAL_RETRY_COUNT`). The re-run has `ctx.retry_count` above zero, and in-process it looks the same as a replay from the dashboard.
 2. **A cancel frees the task's slot before its cleanup ends.** In hatchet-sdk 1.42.1, a timeout and a cancel reach the worker as the same `CANCEL_STEP_RUN`. `handle_cancel_action` (`hatchet_sdk/worker/runner/runner.py` in the installed SDK) sets the context's cancellation flag, sleeps one second, cancels the asyncio task, and in its `finally` cleans the run up, which frees the slot. It does not wait for the task's own `finally`, so the next run can take the slot while the last one is still cleaning up.
@@ -53,7 +53,7 @@ Without guard 1, a worker lost for 30 seconds can run the same paid session up t
 - Any task that starts processes, opens long-lived resources or holds a lock that must be gone before the next run on that worker starts.
 - Any worker profile that a redeploy stops while runs are in flight.
 
-A durable task whose effects sit behind checkpoints is the exception: its retry replays from its event log (`src/corvo/worker/defaults.py:21-28`).
+A durable task whose effects sit behind checkpoints is the exception: its retry replays from its event log (`src/corvo/vendors/hatchet/defaults.py:19-26`).
 
 ## Examples
 

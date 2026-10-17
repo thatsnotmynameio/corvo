@@ -2,12 +2,12 @@
 title: An event-triggered Hatchet task reads its event from the context, validates in its body, and is tested past the mock run
 date: 2026-10-16
 category: best-practices
-module: worker event gateway on Hatchet
+module: Hatchet integrations' event listeners
 problem_type: best_practice
 component: background_job
 severity: medium
 applies_when:
-  - A Hatchet workflow or task starts from on_events, as in corvo.worker.event_gateway
+  - A Hatchet workflow or task starts from on_events, as in corvo.vendors.hatchet.integrations
   - A task's input comes from outside corvo and can be malformed
   - A task republishes or pushes Hatchet events of its own
   - A unit test needs a task to see a triggering event's key or id
@@ -20,7 +20,7 @@ tags: [hatchet, events, on-events, triggers, non-retryable, mock-run, log-level,
 
 ## Context
 
-The external event parser (`src/corvo/worker/event_gateway/workflows/external_event_parser.py`) is corvo's first task started by a Hatchet event rather than by a run. Its plan (`docs/plans/2026-10-16-1323-feat-external-event-parser-plan.md`, Sources / Research and KTD2 to KTD10) needed seven facts about hatchet-sdk 1.42.1 and engine v0.110.5. Hatchet's docs do not state them; they came from the SDK and engine source. Missing most of them gives a task or a test that looks right and misbehaves. The parser's module docstring records the ones that shaped that task. The next event-triggered task, such as a consumer of `corvo:external_event:*`, needs all of them again.
+The external event parser (`src/corvo/vendors/hatchet/integrations/github/listener.py`) is corvo's first task started by a Hatchet event rather than by a run. Its plan (`docs/plans/2026-10-16-1323-feat-external-event-parser-plan.md`, Sources / Research and KTD2 to KTD10) needed seven facts about hatchet-sdk 1.42.1 and engine v0.110.5. Hatchet's docs do not state them; they came from the SDK and engine source. Missing most of them gives a task or a test that looks right and misbehaves. The parser's module docstring records the ones that shaped that task. The next event-triggered task, such as a consumer of `corvo:external_event:*`, needs all of them again.
 
 Paths under `hatchet_sdk/` below are in the installed hatchet-sdk 1.42.1, the version `uv.lock` pins. Paths under `pkg/` are in the engine's upstream repository.
 
@@ -49,12 +49,12 @@ Paths under `hatchet_sdk/` below are in the installed hatchet-sdk 1.42.1, the ve
        raise
    ```
 
-4. **Give an event task more than Hatchet's 5-minute schedule timeout.** `schedule_timeout` defaults to `timedelta(minutes=5)` (`hatchet_sdk/hatchet.py:460`). Any event that arrives while no worker is up longer than that is dropped, and corvo logs nothing. Event tasks use `EVENT_SCHEDULE_TIMEOUT`, which is 24 hours (`src/corvo/worker/defaults.py:35`).
+4. **Give an event task more than Hatchet's 5-minute schedule timeout.** `schedule_timeout` defaults to `timedelta(minutes=5)` (`hatchet_sdk/hatchet.py:460`). Any event that arrives while no worker is up longer than that is dropped, and corvo logs nothing. Event tasks use `EVENT_SCHEDULE_TIMEOUT`, which is 24 hours (`src/corvo/vendors/hatchet/defaults.py:33`).
 
 5. **In unit tests, replace the context's properties and the publish, and pass the payload as a model.**
    - `aio_mock_run` cannot set the triggering event. Its `_create_mock_context` builds the `Action` without `triggering_event_key` or `triggering_event_external_id` (`hatchet_sdk/runnables/task.py:605-625`), and both default to `None` (`hatchet_sdk/runnables/action.py:110-111`).
    - It also serializes only a dataclass or a `BaseModel` input (`task.py:596-601`), so a plain `dict` reaches the task as `{}`. That fails silently: a test passing a dict sees an empty payload.
-   - The parser's tests use two fixtures. `triggered_by` monkeypatches `Context.triggering_event_key` and `Context.triggering_event_id` with properties. `push` replaces `hatchet.event.aio_push` on the shared client and records each push. They pass the payload as `EmptyModel(**payload)` (`tests/unit/corvo/worker/event_gateway/workflows/test_external_event_parser.py:49-83`).
+   - The parser's tests use two fixtures. `triggered_by` monkeypatches `Context.triggering_event_key` and `Context.triggering_event_id` with properties. `push` replaces `hatchet.event.aio_push` on the shared client and records each push. They pass the payload as `EmptyModel(**payload)` (`tests/unit/corvo/vendors/hatchet/integrations/github/test_listener.py:53-87`).
    - `aio_push` returns a protobuf `Event`, which mypy could not type in this session, since it found no stubs for it. A frozen dataclass holding only `event_id` stands in for it.
 
 6. **To see a task's debug lines, set the root logger's level before the worker starts.**
@@ -87,14 +87,14 @@ Each point stands for a failure that is easy to miss:
 
 ## When to Apply
 
-- When adding a workflow or task with `on_events`, in `corvo.worker.event_gateway` or elsewhere.
+- When adding a workflow or task with `on_events`, in `corvo.vendors.hatchet.integrations` or elsewhere.
 - When adding a prefix to `EXTERNAL_PREFIXES`. That also needs the worker restarted.
 - When a task's input comes from a system outside corvo.
 - When writing a test that must show that an event did not trigger something.
 
 ## Examples
 
-- **The parser task.** `parse_external_event` (`src/corvo/worker/event_gateway/workflows/external_event_parser.py`) applies points 1 to 4 and 6. Its module docstring states why the task keeps `RETRIES` although it is not idempotent: a retry after a successful publish publishes a second corvo event. That is the accepted cost of retrying a refused publish.
+- **The parser task.** `parse_external_event` (`src/corvo/vendors/hatchet/integrations/github/listener.py`) applies points 1 to 4 and 6. Its module docstring states why the task keeps `RETRIES` although it is not idempotent: a retry after a successful publish publishes a second corvo event. That is the accepted cost of retrying a refused publish.
 - **Its unit tests.** Each protection was removed in turn while the tests ran:
   - turning a failed publish into `NonRetryableException` breaks 2 unit tests;
   - letting an invalid event be retried makes the integration test see 3 retries instead of 0.

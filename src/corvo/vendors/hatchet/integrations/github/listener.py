@@ -1,12 +1,13 @@
 """The external event parser: each event another system pushes to Hatchet,
 published again as a corvo event.
 
-corvo.worker.event_gateway is where events cross into corvo. Its workflows
-and tasks follow docs/worker.md's rules: the logic lives in corvo.core, at
-the mirrored path, and never imports Hatchet; each task is a thin shell that
-adapts Hatchet's event to the core and publishes what the core returns.
-Every definition here goes on the main profile's list in
-corvo.worker.profiles.main.
+corvo.vendors.hatchet.integrations holds the Hatchet workflows through
+which outside sources' events cross into corvo, and the main profile serves
+them. They follow docs/worker.md's rules: the logic lives in corvo.core,
+this listener's in corvo.core.event_gateway, and never imports Hatchet; each
+task is a thin shell that adapts Hatchet's event to the core and publishes
+what the core returns. Every definition here goes on the main profile's list
+in corvo.worker.profiles.main.
 
 The workflow listens to EXTERNAL_PREFIXES, each as `prefix:*`. The engine
 matches that as an anchored SQL LIKE, so the parser never receives its own
@@ -32,7 +33,11 @@ from pydantic import BaseModel
 
 from corvo.core.event_gateway.external_event_parser import parse
 from corvo.vendors.hatchet.client import hatchet
-from corvo.worker.defaults import EVENT_SCHEDULE_TIMEOUT, EXECUTION_TIMEOUT, RETRIES
+from corvo.vendors.hatchet.defaults import (
+    EVENT_SCHEDULE_TIMEOUT,
+    EXECUTION_TIMEOUT,
+    RETRIES,
+)
 
 logger = logging.getLogger(__name__)
 

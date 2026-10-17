@@ -1,8 +1,8 @@
 """An external event as a corvo event.
 
-The core twin of `corvo.worker.event_gateway.workflows.external_event_parser`,
-at the mirrored path: the workflow reads the event Hatchet delivered, and this
-module decides what corvo event it becomes.
+The core of `corvo.vendors.hatchet.integrations.github.listener`: the
+workflow reads the event Hatchet delivered, and this module decides what corvo
+event it becomes.
 
 This module imports only `corvo.core.events` and the standard library.
 """

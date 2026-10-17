@@ -8,9 +8,13 @@ from hatchet_sdk import Context, EmptyModel, NonRetryableException
 
 from corvo.core.events.event import Event
 from corvo.vendors.hatchet.client import hatchet
-from corvo.worker.defaults import EVENT_SCHEDULE_TIMEOUT, EXECUTION_TIMEOUT, RETRIES
-from corvo.worker.event_gateway.workflows import external_event_parser as module
-from corvo.worker.event_gateway.workflows.external_event_parser import (
+from corvo.vendors.hatchet.defaults import (
+    EVENT_SCHEDULE_TIMEOUT,
+    EXECUTION_TIMEOUT,
+    RETRIES,
+)
+from corvo.vendors.hatchet.integrations.github import listener as module
+from corvo.vendors.hatchet.integrations.github.listener import (
     ParsedOutput,
     external_event_parser,
     parse_external_event,

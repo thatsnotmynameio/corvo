@@ -1,6 +1,4 @@
-# Lifted on this line alone, so the module's other imports keep every ban: it
-# must not import the worker, which imports it.
-from hatchet_sdk import ClientConfig, ClientTLSConfig, Hatchet  # noqa: TID251
+from hatchet_sdk import ClientConfig, ClientTLSConfig, Hatchet
 
 from corvo.settings import get_settings
 
