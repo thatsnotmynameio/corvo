@@ -31,7 +31,7 @@ permissions: {}
 jobs:
   # CodeQL's advanced setup, with the security-extended suite
   # (.github/codeql/codeql-config.yml), through the organization's workflow:
-  # the checks "codeql / codeql (python)" and "codeql / codeql (actions)". Its
+  # the checks "codeql / python" and "codeql / actions". Its
   # alerts do not fail the jobs. A job fails on a build or analysis error,
   # and then uploads nothing.
   # The job's id, codeql, is a contract, as are the categories /language:python
@@ -41,4 +41,4 @@ jobs:
     permissions:
       contents: read
       security-events: write # uploads the results to code scanning
-    uses: thatsnotmynameio/github-actions/.github/workflows/codeql.yml@4339553065e0e0653a3a524a343d79dd816f09a0 # main
+    uses: thatsnotmynameio/github-actions/.github/workflows/codeql.yml@3615f1d6cbd08e5797a4fa1318a775cc1c62931e # v0.4.0
