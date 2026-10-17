@@ -1,11 +1,11 @@
 # Writing tasks and workflows
 
-corvo-worker's tasks live in `corvo.worker.tasks` and its workflows in `corvo.worker.workflows`. `corvo.worker.event_gateway` follows the same rules. This document holds the rules for writing one. Agent tasks run on the agent worker, and [Running agents](agents.md) and the agents' own modules cover them.
+corvo-worker's tasks live in `corvo.worker.tasks` and its workflows in `corvo.worker.workflows`. The listeners in `corvo.vendors.hatchet.integrations` follow the same rules, except that a listener's logic need not sit at the mirrored path: the GitHub listener's is in `corvo.core.event_gateway`. This document holds the rules for writing one. Agent tasks run on the agent worker, and [Running agents](agents.md) and the agents' own modules cover them.
 
 ## Where the code goes
 
 - The logic lives in `corvo.core`, at the mirrored path, and never imports Hatchet. A task, or a workflow's step, is a thin shell: it adapts Hatchet's input and output to the core, and spawns, waits and reads runs. It holds no logic of its own.
-- Declare each task, workflow and step at module top level, passing the defaults from `corvo.worker.defaults`. Add each one to the main profile's list in `corvo.worker.profiles.main`: `tests/unit/corvo/worker/test_registration.py` fails, naming the definition, when one is missing.
+- Declare each task, workflow and step at module top level, passing the defaults from `corvo.vendors.hatchet.defaults`. Add each one to the main profile's list in `corvo.worker.profiles.main`: `tests/unit/corvo/worker/test_registration.py` fails, naming the definition, when one is missing.
 - Keep Hatchet's by-name stubs out of these areas. A stub is a workflow too, and every workflow in them is one the worker must serve. The stubs of agent tasks live in `corvo.worker.agent_calls`.
 
 ## A standalone task
@@ -17,7 +17,7 @@ A task passes `RETRIES` and `EXECUTION_TIMEOUT`. A task that is not idempotent r
 - Every node of a DAG receives the workflow's input. A DAG reuses a task by spawning it as a child run from one of its own steps.
 - A step reads its parent step's output with `ctx.task_output(parent)`.
 - The failure handler, declared with `on_failure_task`, runs once when any step has failed. Hatchet appends `-on-failure` to the name it declares. A step that raises `NonRetryableException` is not retried, so the handler runs at once.
-- A step that waits on a child run declares `retries=0` and `WAITING_EXECUTION_TIMEOUT`, and every other step passes the defaults. The reasons are in `corvo.worker.defaults`.
+- A step that waits on a child run declares `retries=0` and `WAITING_EXECUTION_TIMEOUT`, and every other step passes the defaults. The reasons are in `corvo.vendors.hatchet.defaults`.
 - While it waits, the step holds a worker slot its child cannot use. When every slot holds a waiting step, the children never start and fail on Hatchet's scheduling timeout. A step that spawns many children, or waits long, belongs in a durable task, which Hatchet can evict to free its slot while it waits. https://docs.hatchet.run/v1/durable-tasks.md
 
 ## A step that spawns an agent
