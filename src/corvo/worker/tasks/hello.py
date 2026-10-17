@@ -14,8 +14,8 @@ from hatchet_sdk import Context
 from pydantic import BaseModel
 
 from corvo.core.tasks.hello import greet
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.defaults import EXECUTION_TIMEOUT, RETRIES
-from corvo.worker.hatchet_client import hatchet
 
 
 class HelloInput(BaseModel):

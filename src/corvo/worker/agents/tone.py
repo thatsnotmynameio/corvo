@@ -21,13 +21,13 @@ from hatchet_sdk import Context
 
 from corvo.agents.tone import agent
 from corvo.agents.tone.models import WRITES_WORKDIR, ToneInput, ToneOutput
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.agent_runtime.sessions import run_agent
 from corvo.worker.defaults import (
     AGENT_CONCURRENCY,
     AGENT_EXECUTION_TIMEOUT,
     AGENT_SCHEDULE_TIMEOUT,
 )
-from corvo.worker.hatchet_client import hatchet
 
 
 @hatchet.task(

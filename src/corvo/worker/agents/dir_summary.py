@@ -12,6 +12,7 @@ from hatchet_sdk import Context
 
 from corvo.agents.dir_summary import agent
 from corvo.agents.dir_summary.models import WRITES_WORKDIR, DirSummaryOutput
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.agent_calls import DirSummaryTaskInput
 from corvo.worker.agent_runtime.sessions import run_agent
 from corvo.worker.defaults import (
@@ -19,7 +20,6 @@ from corvo.worker.defaults import (
     AGENT_EXECUTION_TIMEOUT,
     AGENT_SCHEDULE_TIMEOUT,
 )
-from corvo.worker.hatchet_client import hatchet
 
 
 @hatchet.task(

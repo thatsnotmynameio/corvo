@@ -17,7 +17,7 @@ client.
 
 from corvo.agents.dir_summary.models import DirSummaryInput, DirSummaryOutput
 from corvo.agents.tone.models import ToneInput, ToneOutput
-from corvo.worker.hatchet_client import hatchet
+from corvo.vendors.hatchet.client import hatchet
 
 
 class DirSummaryTaskInput(DirSummaryInput):

@@ -28,12 +28,12 @@ from hatchet_sdk import Context, NonRetryableException
 from pydantic import BaseModel
 
 from corvo.core.workflows import greeting as core
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.defaults import (
     EXECUTION_TIMEOUT,
     RETRIES,
     WAITING_EXECUTION_TIMEOUT,
 )
-from corvo.worker.hatchet_client import hatchet
 from corvo.worker.tasks.hello import HelloInput, HelloOutput, hello
 
 

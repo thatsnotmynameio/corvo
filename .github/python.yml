@@ -18,7 +18,9 @@ trunk:
     pytest: [tests/integration]
   - collection: yQxWQ7gk # corvo-server
     pytest: [tests/unit/corvo/server]
+  - collection: wdP8MX7C # corvo-vendors
+    pytest: [tests/unit/corvo/vendors]
   - collection: Sz6YOghs # corvo-worker
     pytest: [tests/unit/corvo/worker]
   - collection: IJbTawYj # corvo
-    pytest: [tests, --ignore=tests/unit/corvo/agents, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/unit/corvo/server, --ignore=tests/unit/corvo/worker]
+    pytest: [tests, --ignore=tests/unit/corvo/agents, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/unit/corvo/server, --ignore=tests/unit/corvo/vendors, --ignore=tests/unit/corvo/worker]

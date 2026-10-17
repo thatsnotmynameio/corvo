@@ -43,8 +43,8 @@ from hatchet_sdk import DurableContext, SleepCondition, UserEventCondition, or_
 from pydantic import BaseModel, Field
 
 from corvo.core.workflows import greeting_rounds as core
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.defaults import RETRIES
-from corvo.worker.hatchet_client import hatchet
 from corvo.worker.tasks.hello import HelloInput, hello
 from corvo.worker.workflows.greeting import GreetingInput, ShoutOutput, greeting
 

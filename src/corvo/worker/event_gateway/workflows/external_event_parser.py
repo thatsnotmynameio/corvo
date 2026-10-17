@@ -31,8 +31,8 @@ from hatchet_sdk import Context, EmptyModel, NonRetryableException
 from pydantic import BaseModel
 
 from corvo.core.event_gateway.external_event_parser import parse
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.defaults import EVENT_SCHEDULE_TIMEOUT, EXECUTION_TIMEOUT, RETRIES
-from corvo.worker.hatchet_client import hatchet
 
 logger = logging.getLogger(__name__)
 

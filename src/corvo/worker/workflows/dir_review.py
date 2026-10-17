@@ -36,10 +36,10 @@ from pydantic import BaseModel
 from corvo.agents.dir_summary.models import DirSummaryOutput
 from corvo.agents.tone.models import ToneInput
 from corvo.core.workflows import dir_review as core
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker import agent_calls
 from corvo.worker.agent_calls import DirSummaryTaskInput
 from corvo.worker.defaults import AGENT_WAITING_EXECUTION_TIMEOUT
-from corvo.worker.hatchet_client import hatchet
 
 
 class DirReviewInput(BaseModel):
