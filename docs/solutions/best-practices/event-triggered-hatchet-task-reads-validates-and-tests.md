@@ -54,14 +54,14 @@ Paths under `hatchet_sdk/` below are in the installed hatchet-sdk 1.42.1, the ve
 5. **In unit tests, replace the context's properties and the publish, and pass the payload as a model.**
    - `aio_mock_run` cannot set the triggering event. Its `_create_mock_context` builds the `Action` without `triggering_event_key` or `triggering_event_external_id` (`hatchet_sdk/runnables/task.py:605-625`), and both default to `None` (`hatchet_sdk/runnables/action.py:110-111`).
    - It also serializes only a dataclass or a `BaseModel` input (`task.py:596-601`), so a plain `dict` reaches the task as `{}`. That fails silently: a test passing a dict sees an empty payload.
-   - The parser's tests use two fixtures. `triggered_by` monkeypatches `Context.triggering_event_key` and `Context.triggering_event_id` with properties. `push` replaces `hatchet.event.aio_push` on the shared client and records each push. They pass the payload as `EmptyModel(**payload)` (`tests/worker/event_gateway/workflows/test_external_event_parser.py:49-83`).
+   - The parser's tests use two fixtures. `triggered_by` monkeypatches `Context.triggering_event_key` and `Context.triggering_event_id` with properties. `push` replaces `hatchet.event.aio_push` on the shared client and records each push. They pass the payload as `EmptyModel(**payload)` (`tests/unit/corvo/worker/event_gateway/workflows/test_external_event_parser.py:49-83`).
    - `aio_push` returns a protobuf `Event`, which mypy could not type in this session, since it found no stubs for it. A frozen dataclass holding only `event_id` stands in for it.
 
 6. **To see a task's debug lines, set the root logger's level before the worker starts.**
    - Hatchet forwards Python log records from inside a task to the run's log. The forwarder is a handler on the root logger (the config's `logger: Logger = getLogger()`, `hatchet_sdk/config.py:249`).
    - The handler is created once, when the worker's action runner starts (`hatchet_sdk/worker/runner/run_loop_manager.py:73-80`). It copies the root logger's level at that moment (`hatchet_sdk/worker/runner/utils/capture_logs.py:200-202`).
    - `logging.basicConfig(level=...)` would not help, since it does nothing once the root logger has a handler, and under pytest it already has one.
-   - `worker.main()` keeps `basicConfig()` for stdout and then sets `CORVO_LOG_LEVEL` on the root logger itself, before `start` (`src/corvo/worker/worker.py:40-45`). `test_main_sets_the_root_level_before_the_worker_starts` (`tests/worker/test_worker.py:73`) patches `Worker.start` to record the root level at that moment.
+   - `worker.main()` keeps `basicConfig()` for stdout and then sets `CORVO_LOG_LEVEL` on the root logger itself, before `start` (`src/corvo/worker/worker.py:40-45`). `test_main_sets_the_root_level_before_the_worker_starts` (`tests/unit/corvo/worker/test_worker.py:73`) patches `Worker.start` to record the root level at that moment.
    - Use `logging.getLogger(__name__)` rather than `ctx.log`, because `ctx.log` sends every line as INFO.
 
 7. **In integration tests, find runs by the push id. To prove that nothing ran, push a barrier event and check your lookup first.**
@@ -71,7 +71,7 @@ Paths under `hatchet_sdk/` below are in the installed hatchet-sdk 1.42.1, the ve
      - A later event of a listed prefix whose run has finished. Once it has, the engine has handled the events pushed before it.
      - Proof that a listed event's `metadata.id` is the id runs are filtered by.
 
-   Without that proof, the check on a republished event, whose id comes from the event list and not from a push, can pass whatever the engine did. `test_only_a_listed_prefix_starts_the_parser` (`tests/integration/worker/test_event_gateway.py:91-111`) does both.
+   Without that proof, the check on a republished event, whose id comes from the event list and not from a push, can pass whatever the engine did. `test_only_a_listed_prefix_starts_the_parser` (`tests/integration/corvo/worker/test_event_gateway.py:91-111`) does both.
 
 ## Why This Matters
 

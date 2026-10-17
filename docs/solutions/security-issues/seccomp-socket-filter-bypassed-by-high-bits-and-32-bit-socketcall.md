@@ -25,7 +25,7 @@ The agent worker's seccomp profile is Docker's (moby's) default plus the calls b
 
 ## Symptoms
 
-Measured in the `agent-worker` image under the first profile, with the probes now in `tests/integration/worker/gate/driver.py:134-176`:
+Measured in the `agent-worker` image under the first profile, with the probes now in `tests/integration/corvo/worker/gate/driver.py:134-176`:
 
 - a raw `socket()` syscall with protocol `0x10000000c` opened a netfilter socket;
 - one with family `0x100000010` opened one too;
@@ -38,7 +38,7 @@ The plain call, `socket(16, 3, 12)`, was refused, and the JSON-level evaluator i
 - **Splitting Docker's `a0 < 38` socket rule** into `a0 < 16` and `a0 < 38 AND a2 != 12`. This held only for exact values. A Docker/runc rule cannot put two conditions on the same argument, because runc turns same-index conditions into separate rules, which ORs them. So the protocol can only be compared once, and that compare is 64-bit.
 - **Removing `socketcall` from the unconditional allow list.** It did nothing. In this session's export of the compiled filter (libseccomp 2.6.0), libseccomp compiled every argument-filtered `socket` rule for the x86 sub-architecture into `if ($syscall == 102) if ($a0 == 1) action ALLOW;`, which is `socketcall(SYS_SOCKET)` with no family or protocol check, whether `socketcall` is listed or not.
 - **A deny rule with Docker's default errno.** libseccomp 2.6.0 refused a rule whose action equals the filter's default action, `ERRNO(1)`: `seccomp_rule_add_array` returned `-13` (`-EACCES`) in this session's export. runc's JSON gives no sign of this: the rule simply does not exist.
-- **Trusting the JSON evaluator in `tests/worker/agent_runtime/test_seccomp.py:72-111`.** It models what the JSON says, not what libseccomp compiles: Python ints are unbounded, and the evaluator has no notion of architecture.
+- **Trusting the JSON evaluator in `tests/unit/corvo/worker/agent_runtime/test_seccomp.py:72-111`.** It models what the JSON says, not what libseccomp compiles: Python ints are unbounded, and the evaluator has no notion of architecture.
 
 ## Solution
 
@@ -59,7 +59,7 @@ x86_64["subArchitectures"].remove("SCMP_ARCH_X86")  # leaves ["SCMP_ARCH_X32"]
 rules.append(NETFILTER_SOCKET_RULE)
 ```
 
-For Docker's JSON, `SCMP_CMP_MASKED_EQ` holds when `(arg & value) == valueTwo`. Afterwards the container refuses the plain call and both high-bit encodings with `EPROTONOSUPPORT`, the 32-bit call dies with SIGSYS (the filter's bad-architecture action), and `NETLINK_ROUTE` still opens. `tests/integration/worker/test_isolation_gate.py:181-191` asserts all five.
+For Docker's JSON, `SCMP_CMP_MASKED_EQ` holds when `(arg & value) == valueTwo`. Afterwards the container refuses the plain call and both high-bit encodings with `EPROTONOSUPPORT`, the 32-bit call dies with SIGSYS (the filter's bad-architecture action), and `NETLINK_ROUTE` still opens. `tests/integration/corvo/worker/test_isolation_gate.py:181-191` asserts all five.
 
 ## Why This Works
 

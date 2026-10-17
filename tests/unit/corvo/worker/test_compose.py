@@ -26,7 +26,7 @@ import yaml
 
 from corvo.worker.profiles import PROFILES
 
-ROOT = Path(__file__).parents[2]
+ROOT = Path(__file__).parents[4]
 VARIABLE = "CORVO_WORKER_PROFILE"
 WORKER = "corvo-worker"
 

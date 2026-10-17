@@ -26,7 +26,7 @@ from .conftest import BUBBLEWRAP, ROOT, docker_available, lift_apparmor
 
 IMAGE = "corvo-agent-worker:gate"
 SECCOMP = ROOT / "src" / "corvo" / "worker" / "agent_runtime" / "seccomp.json"
-DRIVER = "/app/tests/integration/worker/gate/driver.py"
+DRIVER = "/app/tests/integration/corvo/worker/gate/driver.py"
 UNCONFINED = ["--security-opt", "apparmor=unconfined"]
 
 # The variables a session's engine may hold (KTD20), and the PWD bubblewrap

@@ -25,7 +25,7 @@ from corvo.agents.tone.models import ToneInput, ToneOutput
 from corvo.worker.agent_calls import DirSummaryTaskInput
 
 HERE = Path(__file__).parent
-ROOT = HERE.parents[2]
+ROOT = HERE.parents[3]
 # The tenant hatchet-admin quickstart creates, in Hatchet's Docker Compose
 # guide.
 TENANT_ID = "707d0855-80ab-4e1f-a156-f1c4546cbf52"

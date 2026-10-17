@@ -33,7 +33,7 @@ from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
 from corvo.worker.defaults import AGENT_MEMORY, AGENT_PIDS_LIMIT, AGENT_TMPFS_SIZE
 
 HERE = Path(__file__).parent
-TESTS = HERE.parents[2]
+TESTS = HERE.parents[3]
 AGENTS = Path("/sys/fs/cgroup/agents")
 WRAPPER = str(Path(sys.executable).parent / "corvo-agent-sandbox")
 ENGINE = os.environ["CORVO_AGENT_ENGINE"]
@@ -258,7 +258,7 @@ async def session(directory: Path) -> dict[str, Any]:
     api = subprocess.Popen(
         [
             sys.executable,
-            str(TESTS / "agents" / "scripted_api.py"),
+            str(TESTS / "support" / "scripted_api.py"),
             "127.0.0.1",
             str(port),
             str(script),

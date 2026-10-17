@@ -5,9 +5,9 @@ from typing import Any
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions, SandboxSettings
 
-from agents.isolation import assert_isolated
-from agents.scripted import session
 from corvo.agents.session import Session, sandbox_settings
+from support.isolation import assert_isolated
+from support.scripted import session
 
 
 def isolated(given: Session) -> ClaudeAgentOptions:

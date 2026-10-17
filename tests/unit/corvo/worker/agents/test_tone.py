@@ -1,5 +1,4 @@
 import pytest
-from agents.scripted import SESSION_ID, ScriptedQuery, init, result
 from claude_agent_sdk import ResultError
 from hatchet_sdk import Context
 
@@ -13,6 +12,7 @@ from corvo.worker.defaults import (
     AGENT_EXECUTION_TIMEOUT,
     AGENT_SCHEDULE_TIMEOUT,
 )
+from support.scripted import SESSION_ID, ScriptedQuery, init, result
 
 from ..agent_runtime.fake_cgroups import Tree
 from ..test_registration import (

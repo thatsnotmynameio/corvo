@@ -36,7 +36,7 @@ The agent sets the options it owns, each for a reason:
   loads no MCP server but the agent's own.
 - model, max_turns and max_budget_usd are the agent's own declarations.
 
-tests/agents/isolation.py checks both halves in each agent's tests.
+tests/support/isolation.py checks both halves in each agent's tests.
 
 The run succeeds only on a result whose structured output validates against
 the verdict's schema: corvo.agents.session.consume applies that rule.

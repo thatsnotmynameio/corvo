@@ -9,7 +9,7 @@ caller and the task validate the same class.
 
 A stub has its task's name and its task's input and output classes, and
 belongs on no profile's list: a worker serving it would take the task's runs
-and raise. tests/worker/test_registration.py checks both.
+and raise. tests/unit/corvo/worker/test_registration.py checks both.
 
 It imports only the agents' models, which import no SDK, and the Hatchet
 client.

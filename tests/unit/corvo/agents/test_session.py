@@ -10,9 +10,9 @@ from claude_agent_sdk import (
 )
 from pydantic import BaseModel
 
-from agents.scripted import SESSION_ID, ScriptedQuery, init, result
 from corvo.agents.report import AgentRunFailed, RunReport
 from corvo.agents.session import consume
+from support.scripted import SESSION_ID, ScriptedQuery, init, result
 
 
 class Verdict(BaseModel):

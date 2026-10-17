@@ -5,23 +5,20 @@
 # tests cover.
 coverage: 90
 # Trunk Flaky Tests' test collections, each with the pytest arguments that
-# pick its tests: one for each directory of tests/, and the last one for the
-# rest (test_settings.py, test_import_boundaries.py and any test outside them).
-# Each runs in a job of its own, and its results go to its collection.
-# While the tests move from tests/{area} to tests/unit/corvo/{area}, each
-# collection is every test minus the others', in both layouts: pytest refuses
-# a path that does not exist but takes an --ignore of one. The move puts each
-# collection back on its own path.
+# pick its tests: one for each directory of tests/unit/corvo/, one for
+# tests/integration/, and the last one for the rest (test_settings.py,
+# test_import_boundaries.py and any test outside them). Each runs in a job of
+# its own, and its results go to its collection.
 trunk:
   - collection: YJ9od0SO # corvo-agents
-    pytest: [tests, --ignore=tests/core, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/server, --ignore=tests/unit/corvo/server, --ignore=tests/worker, --ignore=tests/unit/corvo/worker, --ignore=tests/test_settings.py, --ignore=tests/test_import_boundaries.py, --ignore=tests/unit/corvo/test_settings.py, --ignore=tests/unit/corvo/test_import_boundaries.py]
+    pytest: [tests/unit/corvo/agents]
   - collection: 29TSvQtU # corvo-core
-    pytest: [tests, --ignore=tests/agents, --ignore=tests/unit/corvo/agents, --ignore=tests/integration, --ignore=tests/server, --ignore=tests/unit/corvo/server, --ignore=tests/worker, --ignore=tests/unit/corvo/worker, --ignore=tests/test_settings.py, --ignore=tests/test_import_boundaries.py, --ignore=tests/unit/corvo/test_settings.py, --ignore=tests/unit/corvo/test_import_boundaries.py]
+    pytest: [tests/unit/corvo/core]
   - collection: iEWIqdL3 # corvo-integration
     pytest: [tests/integration]
   - collection: yQxWQ7gk # corvo-server
-    pytest: [tests, --ignore=tests/agents, --ignore=tests/unit/corvo/agents, --ignore=tests/core, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/worker, --ignore=tests/unit/corvo/worker, --ignore=tests/test_settings.py, --ignore=tests/test_import_boundaries.py, --ignore=tests/unit/corvo/test_settings.py, --ignore=tests/unit/corvo/test_import_boundaries.py]
+    pytest: [tests/unit/corvo/server]
   - collection: Sz6YOghs # corvo-worker
-    pytest: [tests, --ignore=tests/agents, --ignore=tests/unit/corvo/agents, --ignore=tests/core, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/server, --ignore=tests/unit/corvo/server, --ignore=tests/test_settings.py, --ignore=tests/test_import_boundaries.py, --ignore=tests/unit/corvo/test_settings.py, --ignore=tests/unit/corvo/test_import_boundaries.py]
+    pytest: [tests/unit/corvo/worker]
   - collection: IJbTawYj # corvo
-    pytest: [tests, --ignore=tests/agents, --ignore=tests/unit/corvo/agents, --ignore=tests/core, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/server, --ignore=tests/unit/corvo/server, --ignore=tests/worker, --ignore=tests/unit/corvo/worker]
+    pytest: [tests, --ignore=tests/unit/corvo/agents, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/unit/corvo/server, --ignore=tests/unit/corvo/worker]

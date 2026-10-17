@@ -21,7 +21,7 @@ services:
     volumes: !override
       - ${CORVO_TEST_AGENT_ROOT:?Variable not set}:${CORVO_TEST_AGENT_ROOT:?Variable not set}
       # In a directory of its own, which the wrapper binds into each sandbox.
-      - ./tests/agents/fake_claude.py:/opt/corvo/fake/claude:ro
+      - ./tests/support/fake_claude.py:/opt/corvo/fake/claude:ro
 
   claude-proxy:
     environment:
@@ -36,6 +36,6 @@ services:
         echo '[]' >/tmp/script.json &&
         exec python /scripted/scripted_api.py 0.0.0.0 8080 /tmp/script.json /tmp/log.jsonl
     volumes:
-      - ./tests/agents/scripted_api.py:/scripted/scripted_api.py:ro
+      - ./tests/support/scripted_api.py:/scripted/scripted_api.py:ro
     networks:
       - agents

@@ -96,7 +96,7 @@ When the host's Docker moves to a new major version:
 
 1. Replace `src/corvo/worker/agent_runtime/seccomp-moby-default.json` with moby's `vendor/github.com/moby/profiles/seccomp/default.json` at the new `docker-v<version>` tag, and update the tag in `corvo.worker.agent_runtime.seccomp`'s docstring and here.
 2. Run `uv run python -m corvo.worker.agent_runtime.seccomp`, and review the difference in `seccomp.json`.
-3. Run `uv run pytest tests/worker/agent_runtime/test_seccomp.py` and the integration suite.
+3. Run `uv run pytest tests/unit/corvo/worker/agent_runtime/test_seccomp.py` and the integration suite.
 
 ## Proving an agent on Claude Haiku
 
