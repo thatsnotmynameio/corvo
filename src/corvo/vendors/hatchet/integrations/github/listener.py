@@ -28,14 +28,12 @@ import logging
 from typing import Final
 from uuid import UUID
 
-# Lifted on these three lines alone, so the module's other imports keep every
-# ban: it must not import the worker, which imports it.
-from hatchet_sdk import Context, EmptyModel, NonRetryableException  # noqa: TID251
+from hatchet_sdk import Context, EmptyModel, NonRetryableException
 from pydantic import BaseModel
 
 from corvo.core.event_gateway.external_event_parser import parse
-from corvo.vendors.hatchet.client import hatchet  # noqa: TID251
-from corvo.vendors.hatchet.defaults import (  # noqa: TID251
+from corvo.vendors.hatchet.client import hatchet
+from corvo.vendors.hatchet.defaults import (
     EVENT_SCHEDULE_TIMEOUT,
     EXECUTION_TIMEOUT,
     RETRIES,
