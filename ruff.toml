@@ -25,6 +25,10 @@ known-first-party = ["support"]
 [lint.per-file-ignores]
 "src/corvo/server/api/**" = ["TID251"]
 "tests/unit/corvo/server/api/**" = ["TID251"]
+# The adapter imports Hatchet and its own modules. The exemption lifts its
+# corvo.worker ban too, so tests/unit/corvo/test_import_boundaries.py checks
+# that it never imports the worker.
+"src/corvo/vendors/hatchet/**" = ["TID251"]
 "tests/unit/corvo/vendors/hatchet/**" = ["TID251"]
 "src/corvo/worker/**" = ["TID251"]
 "tests/unit/corvo/worker/**" = ["TID251"]
