@@ -15,6 +15,11 @@ select = ["E", "W", "F", "I", "UP", "B", "TID251"]
 "hatchet_sdk".msg = "Only corvo.worker imports Hatchet."
 "corvo.worker".msg = "Only corvo.worker imports the worker."
 
+# tests/support, the tests' own doubles, sorts with corvo, not with the
+# third-party packages: it is no package of the test that imports it.
+[lint.isort]
+known-first-party = ["support"]
+
 [lint.per-file-ignores]
 # The tests' entries name both their place on main, tests/{area}, and the one
 # they move to, tests/unit/corvo/{area} or tests/integration/corvo/{area}:
