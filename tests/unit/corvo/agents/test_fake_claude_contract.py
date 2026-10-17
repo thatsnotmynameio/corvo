@@ -29,11 +29,10 @@ from corvo.agents.dir_summary import agent as dir_summary
 from corvo.agents.dir_summary.models import DirSummaryInput, DirSummaryOutput
 from corvo.agents.session import sandbox_settings
 from corvo.agents.tone.models import ToneVerdict
+from support.scripted import session
+from support.scripted_api import handler
 
-from .scripted import session
-from .scripted_api import handler
-
-FAKE = Path(__file__).with_name("fake_claude.py")
+FAKE = Path(__file__).parents[3] / "support" / "fake_claude.py"
 TIMEOUT = 20
 # Whatever credential the environment holds, the fake sends it.
 PLACEHOLDER = "a-placeholder"

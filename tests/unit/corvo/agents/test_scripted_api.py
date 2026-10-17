@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from .scripted_api import handler
+from support.scripted_api import handler
 
 SCRIPT: list[dict[str, Any]] = [
     {"tool_use": [{"name": "Bash", "input": {"command": "echo corvo"}}]},

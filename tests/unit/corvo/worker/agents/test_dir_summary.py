@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-from agents.scripted import ScriptedQuery, init, result
 
 from corvo.agents.dir_summary import agent
 from corvo.agents.dir_summary.models import DirSummaryOutput
@@ -13,6 +12,7 @@ from corvo.worker.defaults import (
     AGENT_EXECUTION_TIMEOUT,
     AGENT_SCHEDULE_TIMEOUT,
 )
+from support.scripted import ScriptedQuery, init, result
 
 from ..agent_runtime.fake_cgroups import Tree
 

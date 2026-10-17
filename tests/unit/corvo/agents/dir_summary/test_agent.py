@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from agents.isolation import assert_isolated
-from agents.scripted import SESSION_ID, ScriptedQuery, init, result, session
 from corvo.agents.dir_summary import agent
 from corvo.agents.dir_summary.models import DirSummaryInput, DirSummaryOutput
 from corvo.agents.report import RunReport
+from support.isolation import assert_isolated
+from support.scripted import SESSION_ID, ScriptedQuery, init, result, session
 
 WORKDIR = Path("/var/lib/corvo/agents/workdirs/issue-7")
 SUMMARY = {"summary": "Two notes on the release.", "word_count": 5}

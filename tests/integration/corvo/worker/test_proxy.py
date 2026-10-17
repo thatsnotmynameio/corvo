@@ -29,7 +29,7 @@ from corvo.worker.agent_runtime.sandbox import PLACEHOLDER
 from .conftest import ROOT, TEST_CREDENTIAL, docker_available
 
 CADDYFILE = ROOT / "src" / "corvo" / "agents" / "Caddyfile"
-SCRIPTED_API = ROOT / "tests" / "agents" / "scripted_api.py"
+SCRIPTED_API = ROOT / "tests" / "support" / "scripted_api.py"
 UPSTREAM_IMAGE = "python:3.14.7-slim"
 OAUTH_BETA = "oauth-2025-04-20"
 

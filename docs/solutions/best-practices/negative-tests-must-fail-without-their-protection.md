@@ -19,12 +19,12 @@ tags: [testing, negative-tests, isolation, sandbox, mutation-check, ci, proxy-lo
 
 The agents skeleton (stack #31 to #46) has many tests that prove that something does not happen: a sandbox refuses, a proxy hides a header, a working directory stays unwritten. Three of them passed with their protection removed. The authors did not notice in any of the three cases: review found each one, and each had a different cause.
 
-1. **A check that failed earlier decided the result.** Before it checks the sandbox's content, `assert_isolated` (`tests/agents/isolation.py:23`) checks that the agent's options carry the session's values, `options.sandbox == session.sandbox` among them (line 50). The content checks come after that, such as `enabled`, `failIfUnavailable` and `allowUnsandboxedCommands`. The weakened-sandbox cases changed only the options, so the equality check failed first. Deleting every content check left all the tests green.
-   - **Fix:** the weakened sandbox now goes into the session too, so its content is the only thing that can fail (`tests/agents/test_isolation.py:105-111`). With the content checks removed, all seven sandbox cases now fail. That fix is in #35.
+1. **A check that failed earlier decided the result.** Before it checks the sandbox's content, `assert_isolated` (`tests/support/isolation.py:23`) checks that the agent's options carry the session's values, `options.sandbox == session.sandbox` among them (line 50). The content checks come after that, such as `enabled`, `failIfUnavailable` and `allowUnsandboxedCommands`. The weakened-sandbox cases changed only the options, so the equality check failed first. Deleting every content check left all the tests green.
+   - **Fix:** the weakened sandbox now goes into the session too, so its content is the only thing that can fail (`tests/unit/corvo/agents/test_isolation.py:105-111`). With the content checks removed, all seven sandbox cases now fail. That fix is in #35.
 2. **The evidence was never produced.** The proxy's log test sent a request too large to accept (a 413) and one to a path the proxy does not serve (a 404). It then asserted that the log was not empty and that no credential header appeared in it. At its default level, Caddy logs no request for a 404 or a 413. The log was not empty only because it held Caddy's startup lines, so it never held a request, and the test passed with the header filter removed.
-   - **Fix:** a third proxy now has an upstream that refuses connections. Its 502 is a line that carries the request, headers and all. The test first asserts that this line exists, then that no header is in it (`tests/integration/worker/test_proxy.py:371-390`). That fix is in #44.
+   - **Fix:** a third proxy now has an upstream that refuses connections. Its 502 is a line that carries the request, headers and all. The test first asserts that this line exists, then that no header is in it (`tests/integration/corvo/worker/test_proxy.py:371-390`). That fix is in #44.
 3. **Something else stopped the attempt.** The integration test's working directory was `0755` and owned by the CI runner's user, whose uid on GitHub's runners is not 1000 (the plan records it as 1001). The agent worker runs as uid 1000 (`Dockerfile`, `useradd --uid 1000`), so it could not write the directory through any bind. "The session cannot write its read-only working directory" held whether or not the sandbox's read-only bind worked. Where the user running the tests is uid 1000, as on a typical single-user Linux machine, the same test did depend on the bind.
-   - **Fix:** the directory is `0777` now, so only the read-only bind keeps the session out (`tests/integration/worker/conftest.py:386-395`). That fix is in #45.
+   - **Fix:** the directory is `0777` now, so only the read-only bind keeps the session out (`tests/integration/corvo/worker/conftest.py:386-395`). That fix is in #45.
 
 ## Guidance
 
@@ -64,7 +64,7 @@ for proxy in proxies.values():
         assert secret not in logs, proxy.container
 ```
 
-After, the test first proves that the log holds the request, then that no header is in it. This is abridged: the test checks every proxy's log, not only this one's (`tests/integration/worker/test_proxy.py:371-390`):
+After, the test first proves that the log holds the request, then that no header is in it. This is abridged: the test checks every proxy's log, not only this one's (`tests/integration/corvo/worker/test_proxy.py:371-390`):
 
 ```python
 status, _ = unreachable.send("POST", "/v1/messages", QUICK, credentials)

@@ -21,14 +21,8 @@ select = ["E", "W", "F", "I", "UP", "B", "TID251"]
 known-first-party = ["support"]
 
 [lint.per-file-ignores]
-# The tests' entries name both their place on main, tests/{area}, and the one
-# they move to, tests/unit/corvo/{area} or tests/integration/corvo/{area}:
-# the move's pull request runs on this file, and drops the old ones.
 "src/corvo/server/api/**" = ["TID251"]
-"tests/server/api/**" = ["TID251"]
 "tests/unit/corvo/server/api/**" = ["TID251"]
 "src/corvo/worker/**" = ["TID251"]
-"tests/worker/**" = ["TID251"]
 "tests/unit/corvo/worker/**" = ["TID251"]
-"tests/integration/worker/**" = ["TID251"]
 "tests/integration/corvo/worker/**" = ["TID251"]

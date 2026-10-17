@@ -42,10 +42,10 @@ A session runs in two nested bubblewrap layers, and neither one is optional.
 
 The layers are not two copies of one protection. Each closes what the other leaves open.
 
-**The wrapper refuses a session that would weaken the inner layer.** It refuses one whose SDK sandbox is off, does not fail when it cannot start, allows unsandboxed commands, excludes commands, or is the weaker nested one (`check_settings`, `sandbox.py:131-162`). `tests/agents/isolation.py`'s `assert_isolated` holds every agent's options to the same rules, plus an empty network allowlist. Keep `failIfUnavailable`: without it, the Python SDK runs commands unsandboxed whenever its sandbox cannot start.
+**The wrapper refuses a session that would weaken the inner layer.** It refuses one whose SDK sandbox is off, does not fail when it cannot start, allows unsandboxed commands, excludes commands, or is the weaker nested one (`check_settings`, `sandbox.py:131-162`). `tests/support/isolation.py`'s `assert_isolated` holds every agent's options to the same rules, plus an empty network allowlist. Keep `failIfUnavailable`: without it, the Python SDK runs commands unsandboxed whenever its sandbox cannot start.
 
 **Prove a change, don't argue it.** A change to either layer, to the wrapper or to the agent worker's container settings is proven the way the decision was:
-- run the isolation gate in CI (`tests/integration/worker/test_isolation_gate.py`), which shows the image can still start both layers;
+- run the isolation gate in CI (`tests/integration/corvo/worker/test_isolation_gate.py`), which shows the image can still start both layers;
 - run the isolation probe from the plan's U8 against the real engine, once it exists.
 
 The negative tests involved must fail without their protection; see the related learning below.
