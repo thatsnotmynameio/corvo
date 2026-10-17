@@ -11,8 +11,10 @@ select = ["E", "W", "F", "I", "UP", "B", "TID251"]
 [lint.flake8-tidy-imports.banned-api]
 "fastapi".msg = "Only corvo.server.api imports FastAPI."
 "starlette".msg = "Only corvo.server.api imports Starlette."
-# Hatchet is the worker's alone, and an interface never imports another.
-"hatchet_sdk".msg = "Only corvo.worker imports Hatchet."
+# Hatchet is the worker's alone, through its client in corvo.vendors.hatchet,
+# and an interface never imports another.
+"hatchet_sdk".msg = "Only corvo.worker and corvo.vendors.hatchet import Hatchet."
+"corvo.vendors.hatchet".msg = "Only corvo.worker imports corvo.vendors.hatchet."
 "corvo.worker".msg = "Only corvo.worker imports the worker."
 
 # tests/support, the tests' own doubles, sorts with corvo, not with the
@@ -23,6 +25,7 @@ known-first-party = ["support"]
 [lint.per-file-ignores]
 "src/corvo/server/api/**" = ["TID251"]
 "tests/unit/corvo/server/api/**" = ["TID251"]
+"tests/unit/corvo/vendors/hatchet/**" = ["TID251"]
 "src/corvo/worker/**" = ["TID251"]
 "tests/unit/corvo/worker/**" = ["TID251"]
 "tests/integration/corvo/worker/**" = ["TID251"]

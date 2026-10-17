@@ -7,6 +7,7 @@ import pytest
 from hatchet_sdk import Context, EmptyModel, NonRetryableException
 
 from corvo.core.events.event import Event
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.defaults import EVENT_SCHEDULE_TIMEOUT, EXECUTION_TIMEOUT, RETRIES
 from corvo.worker.event_gateway.workflows import external_event_parser as module
 from corvo.worker.event_gateway.workflows.external_event_parser import (
@@ -14,7 +15,6 @@ from corvo.worker.event_gateway.workflows.external_event_parser import (
     external_event_parser,
     parse_external_event,
 )
-from corvo.worker.hatchet_client import hatchet
 
 KEY = "github:issue:opened"
 NAME = "corvo:external_event:github:issue:opened"

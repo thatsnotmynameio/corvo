@@ -30,7 +30,7 @@ import corvo.worker.event_gateway
 import corvo.worker.tasks
 import corvo.worker.workflows
 from corvo.settings import get_settings
-from corvo.worker.hatchet_client import hatchet
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.profiles import PROFILES
 
 # Each profile's areas: an agent task belongs on the agent worker alone.

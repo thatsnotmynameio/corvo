@@ -7,7 +7,7 @@ from collections.abc import Callable
 from types import FrameType
 
 from corvo.settings import get_settings
-from corvo.worker.hatchet_client import hatchet
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.profiles import PROFILES, Profile
 
 logger = logging.getLogger(__name__)

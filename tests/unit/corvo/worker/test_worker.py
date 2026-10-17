@@ -11,7 +11,7 @@ from hatchet_sdk import Worker
 import corvo.worker.profiles.agents
 import corvo.worker.profiles.main
 from corvo.settings import get_settings
-from corvo.worker.hatchet_client import hatchet
+from corvo.vendors.hatchet.client import hatchet
 from corvo.worker.profiles import Profile
 from corvo.worker.worker import main, serve
 

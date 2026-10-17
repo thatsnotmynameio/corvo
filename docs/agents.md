@@ -117,7 +117,7 @@ No automated test calls Claude. Each agent is proven once against real Claude Ha
    ```
    docker compose exec worker python -c '
    from corvo.agents.tone.models import ToneInput, ToneOutput
-   from corvo.worker.hatchet_client import hatchet
+   from corvo.vendors.hatchet.client import hatchet
    tone = hatchet.stubs.task(name="tone", input_validator=ToneInput, output_validator=ToneOutput)
    print(tone.run(ToneInput(text="Thanks a lot, that was really helpful!")))
    '
@@ -158,7 +158,7 @@ The same steps, with a working directory the session must summarize. Its files t
    docker compose exec worker python -c '
    from corvo.agents.dir_summary.models import DirSummaryOutput
    from corvo.worker.agent_calls import DirSummaryTaskInput
-   from corvo.worker.hatchet_client import hatchet
+   from corvo.vendors.hatchet.client import hatchet
    task = hatchet.stubs.task(name="dir-summary", input_validator=DirSummaryTaskInput, output_validator=DirSummaryOutput)
    print(task.run(DirSummaryTaskInput(workdir="proof")))
    '
