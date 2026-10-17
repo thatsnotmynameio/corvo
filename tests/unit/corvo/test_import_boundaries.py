@@ -1,13 +1,14 @@
-"""The agents' import boundaries hold across every module in corvo.
+"""The import boundaries ruff cannot see hold across every module in corvo.
 
 Only corvo.agents imports the Claude Agent SDK, and it imports neither
 Hatchet nor the worker; corvo.core imports neither corvo.agents nor the SDK;
 the main profile, and the server, reach neither the agent worker's side nor
 a module that imports the SDK; the sandbox wrapper imports only the standard
-library. Ruff cannot check this: corvo.worker and corvo.server.api ignore its
-TID251 bans wholesale, and CI reads no nested ruff config. This test parses
-each module's imports and names every module that crosses a boundary, and
-the import that does.
+library; the Hatchet adapter, corvo.vendors.hatchet, never imports the worker
+that imports it. Ruff cannot check this: corvo.worker, corvo.server.api and
+corvo.vendors.hatchet ignore its TID251 bans wholesale, and CI reads no
+nested ruff config. This test parses each module's imports and names every
+module that crosses a boundary, and the import that does.
 """
 
 import ast
@@ -186,6 +187,13 @@ def problems(sources: Mapping[str, str]) -> list[str]:
             found += crossing(
                 module, names, SDK, "only corvo.agents imports the Claude Agent SDK"
             )
+        if within(module, "corvo.vendors.hatchet"):
+            found += crossing(
+                module,
+                names,
+                "corvo.worker",
+                "corvo.vendors.hatchet never imports corvo.worker, which imports it",
+            )
         if within(module, "corvo.core"):
             for banned in ("corvo.agents", SDK):
                 found += crossing(
@@ -268,6 +276,31 @@ def test_an_agent_importing_the_worker_package_by_name_is_named() -> None:
         "corvo.agents.x.agent imports corvo.worker: "
         "corvo.agents imports neither Hatchet nor corvo.worker"
     ]
+
+
+ADAPTER_RULE = "corvo.vendors.hatchet never imports corvo.worker, which imports it"
+
+
+@pytest.mark.parametrize(
+    ("source", "imported"),
+    [
+        ("from corvo.worker.defaults import RETRIES\n", "corvo.worker.defaults"),
+        ("from corvo import worker\n", "corvo.worker"),
+    ],
+    ids=["a module", "the package by name"],
+)
+def test_the_hatchet_adapter_importing_the_worker_is_named(
+    source: str, imported: str
+) -> None:
+    found = problems({"corvo.vendors.hatchet.x": source})
+
+    assert found == [f"corvo.vendors.hatchet.x imports {imported}: {ADAPTER_RULE}"]
+
+
+def test_the_hatchet_adapter_importing_hatchet_and_itself_is_allowed() -> None:
+    source = "import hatchet_sdk\nfrom corvo.vendors.hatchet.client import hatchet\n"
+
+    assert problems({"corvo.vendors.hatchet.x": source}) == []
 
 
 def test_the_stubs_importing_sdk_free_models_is_allowed() -> None:
