@@ -56,6 +56,7 @@ services:
       CORVO_HATCHET_TOKEN: ${HATCHET_CLIENT_TOKEN?Variable not set}
       CORVO_HATCHET_TLS_STRATEGY: ${HATCHET_CLIENT_TLS_STRATEGY:?Variable not set}
       CORVO_LOG_LEVEL: ${CORVO_LOG_LEVEL:-INFO}
+      CORVO_ENV: ${CORVO_ENV:-development}
     depends_on:
       hatchet-engine:
         condition: service_started
@@ -84,6 +85,7 @@ services:
       CORVO_HATCHET_TOKEN: ${HATCHET_CLIENT_TOKEN?Variable not set}
       CORVO_HATCHET_TLS_STRATEGY: ${HATCHET_CLIENT_TLS_STRATEGY:?Variable not set}
       CORVO_LOG_LEVEL: ${CORVO_LOG_LEVEL:-INFO}
+      CORVO_ENV: ${CORVO_ENV:-development}
       # The engine, on the agents network, whatever address the token holds.
       HATCHET_CLIENT_HOST_PORT: hatchet-engine:7070
       HATCHET_CLIENT_WORKER_HEALTHCHECK_ENABLED: "True"
