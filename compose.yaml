@@ -1,17 +1,8 @@
-# The app and its PostgreSQL, and Hatchet and its own, run as in production,
-# after Docker's "Use Compose in production": the code stays in the image,
-# only the app's and Hatchet's dashboard's ports reach the host, and the
+# corvo's workers and its PostgreSQL, and Hatchet and its own, run as in
+# production, after Docker's "Use Compose in production": the code stays in
+# the image, only Hatchet's dashboard's port reaches the host, and the
 # services restart on their own.
 # Their settings come from the environment or from .env (see .env.example).
-
-# The image and the database settings migrate and app share.
-x-corvo: &corvo
-  build: .
-  environment:
-    CORVO_POSTGRES_HOST: db
-    CORVO_POSTGRES_USER: ${POSTGRES_USER:?Variable not set}
-    CORVO_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Variable not set}
-    CORVO_POSTGRES_DATABASE: ${POSTGRES_DB:?Variable not set}
 
 # Hatchet's DATABASE_URL. hatchet-migrate reads no other setting, so the user
 # and the password go in the URL and must not need escaping (see
@@ -50,37 +41,7 @@ services:
       start_period: 30s
       timeout: 10s
 
-  # The migrations run once, before the app starts, so a restart of the app
-  # does not run them again.
-  migrate:
-    <<: *corvo
-    depends_on:
-      db:
-        condition: service_healthy
-    command: ["alembic", "-c", "src/corvo/server/database/alembic.ini", "upgrade", "head"]
-
-  app:
-    <<: *corvo
-    restart: always
-    depends_on:
-      db:
-        condition: service_healthy
-        restart: true
-      migrate:
-        condition: service_completed_successfully
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -c
-        - import urllib.request; urllib.request.urlopen("http://localhost:8000/health")
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # The Hatchet worker, from the app's image. It reaches the engine at the
+  # The Hatchet worker, from corvo's image. It reaches the engine at the
   # address in its token, HATCHET_GRPC_BROADCAST_ADDRESS, and depends on the
   # engine as Hatchet's Docker Compose guide says. Without TLS on the engine's
   # gRPC, its own TLS is off too.
@@ -95,6 +56,7 @@ services:
       CORVO_HATCHET_TOKEN: ${HATCHET_CLIENT_TOKEN?Variable not set}
       CORVO_HATCHET_TLS_STRATEGY: ${HATCHET_CLIENT_TLS_STRATEGY:?Variable not set}
       CORVO_LOG_LEVEL: ${CORVO_LOG_LEVEL:-INFO}
+      CORVO_ENV: ${CORVO_ENV:-development}
     depends_on:
       hatchet-engine:
         condition: service_started
@@ -123,6 +85,7 @@ services:
       CORVO_HATCHET_TOKEN: ${HATCHET_CLIENT_TOKEN?Variable not set}
       CORVO_HATCHET_TLS_STRATEGY: ${HATCHET_CLIENT_TLS_STRATEGY:?Variable not set}
       CORVO_LOG_LEVEL: ${CORVO_LOG_LEVEL:-INFO}
+      CORVO_ENV: ${CORVO_ENV:-development}
       # The engine, on the agents network, whatever address the token holds.
       HATCHET_CLIENT_HOST_PORT: hatchet-engine:7070
       HATCHET_CLIENT_WORKER_HEALTHCHECK_ENABLED: "True"

@@ -175,7 +175,7 @@ DOCKERFILE = """\
 FROM python:3.14.7-slim AS app
 RUN uv sync \\
     --locked
-CMD ["uvicorn", "corvo.server.api.server:app", "--port", "8000"]
+CMD ["python", "-m", "http.server"]
 
 FROM app AS worker
 CMD ["corvo-worker"]
@@ -280,7 +280,7 @@ def test_a_stage_without_a_cmd_inherits_its_base_s() -> None:
 
 
 def test_a_build_without_a_target_runs_the_last_stage() -> None:
-    # The last stage is the app's, which runs uvicorn.
+    # The last stage is the app's, which runs a program other than the worker.
     services = compose(
         """\
   app:

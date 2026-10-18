@@ -27,7 +27,7 @@ def full_event() -> Event:
         external_id="evt-1",
         name="issue.opened",
         payload_version=2,
-        source="corvo.server",
+        source="corvo.worker",
         subject="issue/42",
         occurred_at=NOON_UTC,
         category=INVOICES,
@@ -38,7 +38,7 @@ def full_event() -> Event:
 
 def test_a_root_event_given_only_a_name_and_source_has_the_defaults() -> None:
     before = datetime.now(UTC)
-    event = Event(name="issue.opened", source="corvo.server")
+    event = Event(name="issue.opened", source="corvo.worker")
 
     assert event.id.version == 7
     assert event.parent_id is None
@@ -53,27 +53,27 @@ def test_a_root_event_given_only_a_name_and_source_has_the_defaults() -> None:
 
 
 def test_an_event_keeps_its_external_id() -> None:
-    event = Event(name="issue.opened", source="corvo.server", external_id="abc")
+    event = Event(name="issue.opened", source="corvo.worker", external_id="abc")
 
     assert event.external_id == "abc"
 
 
 def test_an_external_id_of_255_characters_passes() -> None:
-    event = Event(name="issue.opened", source="corvo.server", external_id="a" * 255)
+    event = Event(name="issue.opened", source="corvo.worker", external_id="a" * 255)
 
     assert event.external_id == "a" * 255
 
 
 def test_an_event_without_a_category_is_unknown() -> None:
     # Covers AE3.
-    event = Event(name="issue.opened", source="corvo.server")
+    event = Event(name="issue.opened", source="corvo.worker")
 
     assert event.category.id == UNKNOWN.id
     assert event.category.path == ("unknown",)
 
 
 def test_an_event_records_its_category_id_and_path() -> None:
-    event = Event(name="invoice.paid", source="corvo.server", category=INVOICES)
+    event = Event(name="invoice.paid", source="corvo.worker", category=INVOICES)
 
     assert event.category.id == INVOICES.id
     assert event.category.path == ("billing", "invoices")
@@ -85,7 +85,7 @@ def test_occurred_at_is_held_in_utc() -> None:
 
     event = Event(
         name="issue.opened",
-        source="corvo.server",
+        source="corvo.worker",
         occurred_at=datetime(2026, 10, 16, 12, 0, tzinfo=brasilia),
     )
 
@@ -97,7 +97,7 @@ def test_a_naive_occurred_at_fails() -> None:
     with pytest.raises(ValidationError):
         Event(
             name="issue.opened",
-            source="corvo.server",
+            source="corvo.worker",
             occurred_at=datetime(2026, 10, 16, 12, 0),
         )
 
@@ -109,7 +109,7 @@ def test_a_naive_occurred_at_fails() -> None:
 )
 def test_an_occurred_at_outside_utcs_range_fails(occurred_at: str) -> None:
     with pytest.raises(ValidationError):
-        Event(name="issue.opened", source="corvo.server", occurred_at=occurred_at)
+        Event(name="issue.opened", source="corvo.worker", occurred_at=occurred_at)
 
 
 @pytest.mark.parametrize(
@@ -130,7 +130,7 @@ def test_an_occurred_at_outside_utcs_range_fails(occurred_at: str) -> None:
 def test_a_broken_chain_fails(chain: dict[str, UUID]) -> None:
     # Covers AE7.
     with pytest.raises(ValidationError):
-        Event(name="issue.opened", source="corvo.server", **chain)
+        Event(name="issue.opened", source="corvo.worker", **chain)
 
 
 def test_a_child_built_through_the_constructor_passes() -> None:
@@ -177,7 +177,7 @@ def test_a_child_built_through_the_constructor_passes() -> None:
 def test_an_invalid_field_fails(fields: dict[str, Any]) -> None:
     # Covers AE5.
     with pytest.raises(ValidationError):
-        Event(**{"name": "issue.opened", "source": "corvo.server", **fields})
+        Event(**{"name": "issue.opened", "source": "corvo.worker", **fields})
 
 
 def test_no_part_of_an_event_can_change() -> None:

@@ -2,7 +2,67 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import make_url
 
-from corvo.settings import Settings
+from corvo.settings import Environment, Settings
+
+
+def test_the_environment_defaults_to_development() -> None:
+    assert Settings().env is Environment.development
+
+
+def test_the_environment_reads_its_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CORVO_ENV", "production")
+
+    assert Settings().env is Environment.production
+
+
+def test_the_environment_rejects_an_unknown_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CORVO_ENV", "staging")
+
+    with pytest.raises(ValidationError, match="env"):
+        Settings()
+
+
+@pytest.mark.parametrize("env", list(Environment))
+def test_each_environment_check_holds_for_its_own_environment_only(
+    env: Environment,
+) -> None:
+    settings = Settings(env=env)
+
+    assert settings.is_development() is (env is Environment.development)
+    assert settings.is_testing() is (env is Environment.testing)
+    assert settings.is_production() is (env is Environment.production)
+
+
+def test_the_environment_check_takes_a_set() -> None:
+    settings = Settings(env=Environment.testing)
+
+    assert settings.is_environment({Environment.development, Environment.testing})
+    assert not settings.is_environment({Environment.production})
+
+
+def test_the_database_settings_default_to_polars() -> None:
+    settings = Settings()
+
+    assert settings.sqlalchemy_debug is False
+    assert settings.postgres_ssl is False
+    assert settings.database_pool_size == 5
+    assert settings.database_pool_recycle_seconds == 600
+    assert settings.database_command_timeout_seconds == 30.0
+    assert settings.database_connect_timeout_seconds == 10.0
+
+
+def test_the_database_settings_read_their_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CORVO_DATABASE_POOL_SIZE", "12")
+    monkeypatch.setenv("CORVO_POSTGRES_SSL", "true")
+
+    settings = Settings()
+
+    assert settings.database_pool_size == 12
+    assert settings.postgres_ssl is True
 
 
 def test_postgres_dsn_joins_the_settings(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -12,15 +72,20 @@ def test_postgres_dsn_joins_the_settings(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("CORVO_POSTGRES_PORT", "6543")
     monkeypatch.setenv("CORVO_POSTGRES_DATABASE", "prod")
 
-    dsn = Settings().get_postgres_dsn()
+    settings = Settings()
 
-    assert dsn == "postgresql+asyncpg://app:secret@db:6543/prod"
+    assert settings.get_postgres_dsn("asyncpg") == (
+        "postgresql+asyncpg://app:secret@db:6543/prod"
+    )
+    assert settings.get_postgres_dsn("psycopg2") == (
+        "postgresql+psycopg2://app:secret@db:6543/prod"
+    )
 
 
 def test_postgres_dsn_escapes_the_password() -> None:
     password = "p@ss/w:rd#?"
 
-    url = make_url(Settings(postgres_password=password).get_postgres_dsn())
+    url = make_url(Settings(postgres_password=password).get_postgres_dsn("asyncpg"))
 
     assert url.password == password
     assert url.host == "localhost"

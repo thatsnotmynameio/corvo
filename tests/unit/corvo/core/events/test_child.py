@@ -18,7 +18,7 @@ INVOICES = Category(
 def labeled_root() -> Event:
     return Event(
         name="issue.opened",
-        source="corvo.server",
+        source="corvo.worker",
         subject="issue/42",
         occurred_at=NOON_UTC,
         category=INVOICES,
@@ -29,7 +29,7 @@ def labeled_root() -> Event:
 
 def test_a_chain_of_three_shares_the_root_id() -> None:
     # Covers AE1.
-    a = Event(name="issue.opened", source="corvo.server")
+    a = Event(name="issue.opened", source="corvo.worker")
 
     b = a.child(name="issue.triaged", source="corvo.worker")
     c = b.child(name="issue.labeled", source="corvo.worker")
