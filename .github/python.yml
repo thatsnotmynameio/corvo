@@ -5,10 +5,11 @@
 # tests cover.
 coverage: 90
 # Trunk Flaky Tests' test collections, each with the pytest arguments that
-# pick its tests: one for each directory of tests/unit/corvo/, one for
-# tests/integration/, and the last one for the rest (test_settings.py,
-# test_import_boundaries.py and any test outside them). Each runs in a job of
-# its own, and its results go to its collection.
+# pick its tests: one for each directory of tests/unit/corvo/ but server/,
+# whose tests are going, one for tests/integration/, and the last one for the
+# rest (test_settings.py, test_import_boundaries.py, tests/unit/corvo/server/
+# and any test outside them). Each runs in a job of its own, and its results
+# go to its collection.
 trunk:
   - collection: YJ9od0SO # corvo-agents
     pytest: [tests/unit/corvo/agents]
@@ -16,11 +17,9 @@ trunk:
     pytest: [tests/unit/corvo/core]
   - collection: iEWIqdL3 # corvo-integration
     pytest: [tests/integration]
-  - collection: yQxWQ7gk # corvo-server
-    pytest: [tests/unit/corvo/server]
   - collection: wdP8MX7C # corvo-vendors
     pytest: [tests/unit/corvo/vendors]
   - collection: Sz6YOghs # corvo-worker
     pytest: [tests/unit/corvo/worker]
   - collection: IJbTawYj # corvo
-    pytest: [tests, --ignore=tests/unit/corvo/agents, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/unit/corvo/server, --ignore=tests/unit/corvo/vendors, --ignore=tests/unit/corvo/worker]
+    pytest: [tests, --ignore=tests/unit/corvo/agents, --ignore=tests/unit/corvo/core, --ignore=tests/integration, --ignore=tests/unit/corvo/vendors, --ignore=tests/unit/corvo/worker]
