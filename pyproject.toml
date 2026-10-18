@@ -1,7 +1,7 @@
 [project]
 name = "corvo"
 version = "0.1.0"
-description = "corvo's API."
+description = "corvo's Hatchet workers and the agents they run."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -10,15 +10,12 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "alembic>=1.20.0",
     "asyncpg>=0.32.0",
     "claude-agent-sdk==0.2.167",
-    "fastapi>=0.143.0",
     "hatchet-sdk>=1.42.1",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.15.0",
     "sqlalchemy[asyncio]>=2.1.4",
-    "uvicorn[standard]>=0.54.0",
 ]
 
 # The worker's entry point, as Hatchet's Python quickstart declares its own.
@@ -39,7 +36,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "httpx2>=2.13.1",
     "mypy>=2.4.0",
     "prek>=0.5.5",
     "pytest>=9.1.1",

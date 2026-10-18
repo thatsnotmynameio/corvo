@@ -2,13 +2,13 @@
 
 Only corvo.agents imports the Claude Agent SDK, and it imports neither
 Hatchet nor the worker; corvo.core imports neither corvo.agents nor the SDK;
-the main profile, and the server, reach neither the agent worker's side nor
-a module that imports the SDK; the sandbox wrapper imports only the standard
-library; the Hatchet adapter, corvo.vendors.hatchet, never imports the worker
-that imports it. Ruff cannot check this: corvo.worker, corvo.server.api and
-corvo.vendors.hatchet ignore its TID251 bans wholesale, and CI reads no
-nested ruff config. This test parses each module's imports and names every
-module that crosses a boundary, and the import that does.
+the main profile reaches neither the agent worker's side nor a module that
+imports the SDK; the sandbox wrapper imports only the standard library; the
+Hatchet adapter, corvo.vendors.hatchet, never imports the worker that imports
+it. Ruff cannot check this: corvo.worker and corvo.vendors.hatchet ignore its
+TID251 bans wholesale, and CI reads no nested ruff config. This test parses
+each module's imports and names every module that crosses a boundary, and the
+import that does.
 """
 
 import ast
@@ -23,9 +23,8 @@ import corvo
 
 SDK = "claude_agent_sdk"
 
-# The main profile's modules, which reach agents only through stubs, and the
-# server, which will trigger them through the same stubs. The agents
-# profile's modules are imported by name, so nothing here reaches them.
+# The main profile's modules, which reach agents only through stubs. The
+# agents profile's modules are imported by name, so nothing here reaches them.
 MAIN_PROFILE = (
     "corvo.worker.worker",
     "corvo.worker.profiles",
@@ -36,7 +35,6 @@ MAIN_PROFILE_AREAS = (
     "corvo.worker.workflows",
     "corvo.vendors.hatchet.integrations",
     "corvo.worker.agent_calls",
-    "corvo.server",
 )
 # The agent worker's side, which reaches the SDK through corvo.agents.
 AGENT_SIDE = (
@@ -243,10 +241,10 @@ def test_the_worker_importing_the_sdk_is_named() -> None:
 
 
 def test_a_name_imported_from_the_sdk_is_named() -> None:
-    found = problems({"corvo.server.api.x": "from claude_agent_sdk import query\n"})
+    found = problems({"corvo.worker.tasks.x": "from claude_agent_sdk import query\n"})
 
     assert found == [
-        "corvo.server.api.x imports claude_agent_sdk: "
+        "corvo.worker.tasks.x imports claude_agent_sdk: "
         "only corvo.agents imports the Claude Agent SDK"
     ]
 
@@ -358,7 +356,7 @@ AGENT_TASK = {
 }
 
 
-@pytest.mark.parametrize("module", ["corvo.worker.workflows.x", "corvo.server.api.x"])
+@pytest.mark.parametrize("module", ["corvo.worker.workflows.x", "corvo.worker.tasks.x"])
 def test_the_main_profile_importing_an_agent_task_is_named(module: str) -> None:
     found = problems({module: "import corvo.worker.agents.y\n", **AGENT_TASK})
 

@@ -18,7 +18,7 @@ tags: [ruff, tid251, banned-api, per-file-ignores, import-boundaries, hexagonal,
 
 ## Context
 
-`corvo.vendors.hatchet` is corvo's Hatchet adapter: only `corvo.worker` imports it, and it never imports `corvo.worker`. `ruff.toml` bans both directions with TID251 banned-api entries (`ruff.toml:16-18`):
+`corvo.vendors.hatchet` is corvo's Hatchet adapter: only `corvo.worker` imports it, and it never imports `corvo.worker`. `ruff.toml` bans both directions with TID251 banned-api entries (`ruff.toml:12-14`):
 
 - `"hatchet_sdk"`: "Only corvo.worker and corvo.vendors.hatchet import Hatchet."
 - `"corvo.vendors.hatchet"`: "Only corvo.worker imports corvo.vendors.hatchet."
@@ -33,11 +33,11 @@ The adapter first lifted the ban line by line, with `# noqa: TID251` on each ada
 
 ## Guidance
 
-The adapter's folder is exempt from TID251 (`ruff.toml:28-31`). A module under `src/corvo/vendors/hatchet/` imports Hatchet and the adapter's own modules with no `noqa`.
+The adapter's folder is exempt from TID251 (`ruff.toml:22-25`). A module under `src/corvo/vendors/hatchet/` imports Hatchet and the adapter's own modules with no `noqa`.
 
-`corvo.worker` stays off limits to the adapter, but ruff no longer checks it there. `tests/unit/corvo/test_import_boundaries.py` does. It names any module under `corvo.vendors.hatchet` that imports `corvo.worker`, whether by module or by `from corvo import worker` (`tests/unit/corvo/test_import_boundaries.py:190-196`). The test reads every module in the tree, so a new adapter module is covered without editing it.
+`corvo.worker` stays off limits to the adapter, but ruff no longer checks it there. `tests/unit/corvo/test_import_boundaries.py` does. It names any module under `corvo.vendors.hatchet` that imports `corvo.worker`, whether by module or by `from corvo import worker` (`tests/unit/corvo/test_import_boundaries.py:188-194`). The test reads every module in the tree, so a new adapter module is covered without editing it.
 
-Apply the same pairing to any package whose folder is exempted while it must keep one of its bans: add the folder to `per-file-ignores` only together with a rule in `test_import_boundaries.py` for the ban the exemption drops. A nested `ruff.toml` that redefines the bans for one folder is no way out: CI reads no nested ruff config (`tests/unit/corvo/test_import_boundaries.py:9-10`).
+Apply the same pairing to any package whose folder is exempted while it must keep one of its bans: add the folder to `per-file-ignores` only together with a rule in `test_import_boundaries.py` for the ban the exemption drops. A nested `ruff.toml` that redefines the bans for one folder is no way out: CI reads no nested ruff config (`tests/unit/corvo/test_import_boundaries.py:8-9`).
 
 **Land a `ruff.toml` change before the code that relies on it.** CI reads `ruff.toml` from a pull request's base commit (`ruff.toml:1-3`). A pull request that adds the exemption and drops the `noqa` lines at once fails CI's lint on the old config. #67 added the exemption and the test rule and kept `client.py`'s `noqa`. Only after it merged did the pull request moving the listener drop all four.
 
@@ -45,7 +45,7 @@ Apply the same pairing to any package whose folder is exempted while it must kee
 
 Without the test rule, the exemption silently removes the boundary. `ruff.toml` stays green, CI stays green, and the adapter can import the worker that imports it. The rule is the only check of that direction now, so a change that weakens or removes it, or narrows `within(module, "corvo.vendors.hatchet")`, drops the boundary as surely as the exemption would have alone.
 
-`src/corvo/server/api/**` has the same gap today and no test rule. It ignores TID251 wholesale for FastAPI and Starlette (`ruff.toml:26`), which also lifts its Hatchet and worker bans. Issue #64 (open) asks for the matching rule in `test_import_boundaries.py`. The test folders exempted wholesale (`ruff.toml:27`, `32` and `34-35`) have the same gap, which is accepted: a test may need Hatchet's or the worker's names.
+The test folders exempted wholesale (`ruff.toml:26` and `28-29`) have the same gap, which is accepted: a test may need Hatchet's or the worker's names.
 
 ## When to Apply
 
@@ -69,4 +69,3 @@ That was checked by appending `from corvo.worker.defaults import AGENT_CPUS` to 
 - `docs/worker.md`: where tasks, workflows and listeners live, and the defaults they pass.
 - #67: the folder exemption and the boundaries-test rule.
 - #63: the adapter's bans, and the first line-level lift.
-- Issue #64: the server API's wholesale TID251 exemption, which has no test rule yet.

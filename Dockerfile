@@ -1,5 +1,5 @@
-# The app's image, as the FastAPI template and uv's Docker guide build one:
-# the dependencies in a layer of their own, then the project.
+# The app's image, as uv's Docker guide builds one: the dependencies in a
+# layer of their own, then the project.
 # The Python patch is pinned, as Polar does: a floating tag falls behind
 # .python-version and silently stays on a stale cached patch.
 FROM python:3.14.7-slim AS app
@@ -25,9 +25,8 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked
 
-EXPOSE 8000
-
-CMD ["uvicorn", "corvo.server.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# The worker is the image's one program.
+CMD ["corvo-worker"]
 
 # The agent worker (KTD13): the app's image, with bubblewrap and socat for the
 # two sandboxes each session runs in. Its entrypoint starts as root only to

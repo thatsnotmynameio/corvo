@@ -6,11 +6,7 @@ target-version = "py314"
 [lint]
 select = ["E", "W", "F", "I", "UP", "B", "TID251"]
 
-# The business logic knows nothing of HTTP, so another interface (a CLI, a
-# worker) can call it as it is: only the API imports the web framework.
 [lint.flake8-tidy-imports.banned-api]
-"fastapi".msg = "Only corvo.server.api imports FastAPI."
-"starlette".msg = "Only corvo.server.api imports Starlette."
 # Hatchet is the worker's alone, through its client in corvo.vendors.hatchet,
 # and an interface never imports another.
 "hatchet_sdk".msg = "Only corvo.worker and corvo.vendors.hatchet import Hatchet."
@@ -23,8 +19,6 @@ select = ["E", "W", "F", "I", "UP", "B", "TID251"]
 known-first-party = ["support"]
 
 [lint.per-file-ignores]
-"src/corvo/server/api/**" = ["TID251"]
-"tests/unit/corvo/server/api/**" = ["TID251"]
 # The adapter imports Hatchet and its own modules. The exemption lifts its
 # corvo.worker ban too, so tests/unit/corvo/test_import_boundaries.py checks
 # that it never imports the worker.

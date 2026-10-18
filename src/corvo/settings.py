@@ -13,7 +13,6 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="CORVO_")
 
-    debug: bool = False
     # corvo-worker's root logger level. Hatchet forwards a task's log lines
     # at or above it to the run's log.
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
