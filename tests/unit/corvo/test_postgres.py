@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import AsyncIterator, Iterator
 from decimal import Decimal
 from typing import Any
@@ -11,11 +12,16 @@ from sqlalchemy.sql import column, table
 from corvo import postgres
 from corvo.settings import get_settings
 
+# The prefixes of the variables create_async_engine reads, besides CORVO_ENV.
+ENGINE_SETTINGS = ("CORVO_POSTGRES_", "CORVO_DATABASE_", "CORVO_SQLALCHEMY_")
+
 
 @pytest.fixture(autouse=True)
 def fresh_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    for name in ("CORVO_ENV", "CORVO_POSTGRES_SSL", "CORVO_SQLALCHEMY_DEBUG"):
-        monkeypatch.delenv(name, raising=False)
+    """The engine's settings at their defaults, whatever the shell exports."""
+    for name in list(os.environ):
+        if name == "CORVO_ENV" or name.startswith(ENGINE_SETTINGS):
+            monkeypatch.delenv(name)
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
