@@ -1,10 +1,11 @@
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from decimal import Decimal
 from typing import Any
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.sql import column, table
 
 from corvo import postgres
@@ -114,25 +115,28 @@ def test_the_json_serializer_writes_a_decimal_as_a_number(
         serialize({"value": object()})
 
 
-async def test_a_real_engine_takes_the_settings_pool_size_and_echo() -> None:
-    # Building it opens no connection.
+@pytest.fixture
+async def engine() -> AsyncIterator[AsyncEngine]:
+    """A real engine, which opens no connection until a query runs."""
     engine = postgres.create_async_engine("worker")
-    try:
-        assert engine.pool.size() == 5  # type: ignore[attr-defined]
-        assert engine.echo is False
-    finally:
-        await engine.dispose()
+    yield engine
+    await engine.dispose()
 
 
-async def test_the_sessions_keep_their_objects_after_a_commit() -> None:
-    engine = postgres.create_async_engine("worker")
-    try:
-        sessionmaker = postgres.create_async_sessionmaker(engine)
+def test_a_real_engine_takes_the_settings_pool_size_and_echo(
+    engine: AsyncEngine,
+) -> None:
+    assert engine.pool.size() == 5  # type: ignore[attr-defined]
+    assert engine.echo is False
 
-        async with sessionmaker() as session:
-            assert session.sync_session.expire_on_commit is False
-    finally:
-        await engine.dispose()
+
+async def test_the_sessions_keep_their_objects_after_a_commit(
+    engine: AsyncEngine,
+) -> None:
+    sessionmaker = postgres.create_async_sessionmaker(engine)
+
+    async with sessionmaker() as session:
+        assert session.sync_session.expire_on_commit is False
 
 
 def test_insert_builds_postgresql_s_insert() -> None:
