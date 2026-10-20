@@ -180,7 +180,7 @@ services:
       timeout: 10s
 
   hatchet-migrate:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-migrate:v0.110.5
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-migrate:v0.112.15
     command: ["/hatchet/hatchet-migrate"]
     environment:
       DATABASE_URL: *hatchet-database-url
@@ -194,7 +194,7 @@ services:
   # already issued stop working. It also creates the admin, once: a later
   # change to HATCHET_ADMIN_PASSWORD does not change the admin's password.
   hatchet-setup:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-admin:v0.110.5
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-admin:v0.112.15
     command:
       - /hatchet/hatchet-admin
       - quickstart
@@ -218,7 +218,7 @@ services:
   # The engine's gRPC port stays off the host: only the workers in this
   # compose reach it, at HATCHET_GRPC_BROADCAST_ADDRESS.
   hatchet-engine:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:v0.110.5
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-engine:v0.112.15
     restart: always
     command: ["/hatchet/hatchet-engine", "--config", "/hatchet/config"]
     environment: *hatchet-environment
@@ -236,7 +236,7 @@ services:
         condition: service_completed_successfully
 
   hatchet-dashboard:
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-dashboard:v0.110.5
+    image: ghcr.io/hatchet-dev/hatchet/hatchet-dashboard:v0.112.15
     restart: always
     command: ["sh", "./entrypoint.sh", "--config", "/hatchet/config"]
     environment: *hatchet-environment
