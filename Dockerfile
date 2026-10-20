@@ -2,7 +2,7 @@
 # layer of their own, then the project.
 # The Python patch is pinned, as Polar does: a floating tag falls behind
 # .python-version and silently stays on a stale cached patch.
-FROM python:3.14.7-slim AS app
+FROM python:3.14.8-slim AS app
 
 # The uv the organization's CI runs.
 COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /bin/
