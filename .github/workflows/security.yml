@@ -41,4 +41,4 @@ jobs:
     permissions:
       contents: read
       security-events: write # uploads the results to code scanning
-    uses: thatsnotmynameio/github-actions/.github/workflows/codeql.yml@3615f1d6cbd08e5797a4fa1318a775cc1c62931e # v0.4.0
+    uses: thatsnotmynameio/github-actions/.github/workflows/codeql.yml@f5227b462da7e5df7fdfaf47891598cc804e1e5a # v0.6.0

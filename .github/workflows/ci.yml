@@ -31,7 +31,7 @@ jobs:
     permissions:
       contents: read
       security-events: write # uploads ruff's findings to code scanning
-    uses: thatsnotmynameio/github-actions/.github/workflows/python.yml@3615f1d6cbd08e5797a4fa1318a775cc1c62931e # v0.4.0
+    uses: thatsnotmynameio/github-actions/.github/workflows/python.yml@f5227b462da7e5df7fdfaf47891598cc804e1e5a # v0.6.0
     secrets:
       # Trunk's organization token: main's test results go to Trunk.
       TRUNK_API_TOKEN: ${{ secrets.TRUNK_API_TOKEN }}
